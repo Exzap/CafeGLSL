@@ -44,7 +44,7 @@
 #  include <pthread.h>
 #  include <unistd.h> /* close, _exit */
 #elif defined(__WUT__)
-// nothing
+#  include <coreinit/mutex.h>
 #else
 #  error Not supported on this platform.
 #endif
@@ -141,8 +141,6 @@ typedef pthread_once_t  once_flag;
 #  endif
 
 #elif defined(__WUT__)
-
-#include <coreinit/mutex.h>
 
 typedef struct
 {

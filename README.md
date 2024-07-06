@@ -76,7 +76,7 @@ Compile for Wii U using:
    ./cafecompiler/compile_for_cafe.sh
    ```
 
-## Troublshooting and contributing
+## Troubleshooting and contributing
 
 If you have any problems using this, please open a github issue. I'll try to help as much as I can.  
 I would also appreciate any help with this project and PRs are very welcome!
