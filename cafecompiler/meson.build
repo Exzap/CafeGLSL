@@ -13,7 +13,6 @@ files_cafecompiler = files(
 'api.cpp',
 'tests.cpp',
 'tests.h',
-'libgfd/gfd_gx2.h',
 'libgfd/gfd.h',
 'libgfd/gfd_write.cpp',
 'main.cpp',
