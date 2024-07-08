@@ -149,7 +149,7 @@ void main()
 
 }
 
-int TestCompiler()
+int RunTests()
 {
     DebugLog("Initialize compiler...\n");
     if (!GLSL_Init())
@@ -165,9 +165,4 @@ int TestCompiler()
     DebugLog("Done!");
     GLSL_Shutdown();
     return 0;
-}
-
-int main()
-{
-    return TestCompiler();
 }

@@ -1,7 +1,12 @@
 #pragma once
 
+#include <vector>
+#include <array>
+
 #ifdef __WUT__
 // if available use header for shader structs
+#include <gx2/surface.h>
+#include <gx2/texture.h>
 #include <gx2/shaders.h>
 #else
 // when compiling without Cafe headers we manually define the structs so that code can be kept simple
@@ -250,6 +255,45 @@ struct GX2GeometryShader
     BOOL hasStreamOut;
     uint32_t streamOutStride[4];
     GX2RBuffer gx2rBuffer;
+};
+
+struct GX2Surface
+{
+    uint32_t dim;
+    uint32_t width;
+    uint32_t height;
+    uint32_t depth;
+    uint32_t mipLevels;
+    uint32_t format;
+    uint32_t aa;
+
+    union
+    {
+        uint32_t use;
+        uint32_t resourceFlags;
+    };
+
+    uint32_t imageSize;
+    void *image;
+    uint32_t mipmapSize;
+    void *mipmaps;
+    uint32_t tileMode;
+    uint32_t swizzle;
+    uint32_t alignment;
+    uint32_t pitch;
+    std::array<uint32_t, 13> mipLevelOffset;
+};
+
+struct GX2Texture
+{
+    GX2Surface surface;
+    uint32_t viewFirstMip;
+    uint32_t viewNumMips;
+    uint32_t viewFirstSlice;
+    uint32_t viewNumSlices;
+    uint32_t compMap;
+
+    uint32_t regs[5];
 };
 
 #endif

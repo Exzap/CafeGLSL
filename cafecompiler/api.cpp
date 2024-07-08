@@ -5,7 +5,7 @@
 
 #include "cafe_glsl_compiler.h"
 
-static char s_compilerVersion[] = "v0.1.0";
+static char s_compilerVersion[] = "v0.2.0";
 
 #if defined(__WUT__)
 #include <gx2/shaders.h>

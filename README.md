@@ -16,27 +16,66 @@ This library is still in its experimental stage. While it lacks some features an
 
 Shaders may still compile even if you break these rules, but they will likely not function as you expect.
 
-## Usage
+## How to use
+There's two methods of using this compiler.
 
-To use the shader compiler:
+If you need to compile shaders dynamically at runtime on the Wii U, you need to use the .rpl file.
 
-1. Copy `cafecompiler/CafeGLSLCompiler.h` into your project's source directory and include it.
-2. Install `glslcompiler.rpl`
-   - For Aroma: Copy glslcompiler.rpl to `sd:/wiiu/libs/glslcompiler.rpl`
-   - For Cemu: Find the Cemu data folder, on Windows this is where Cemu.exe is. Create a folder called `cafeLibs` and copy glslcompiler.rpl into it.
-   - For Decaf: Copy `glslcompiler.rpl` into the code folder of the title. But note that the shaders currently cause Decaf to assert.
+However, if you can compile all required shaders on your PC (as part of your build process, for example), you should probably use the .elf file.
+It is currently limited to Linux/WSL/Docker only so setting it up may be a bit more involved then the .rpl method.
 
-Currently, the shader compiler is only available as a Wii U dynamic library (.rpl)
+### Statically compile shaders to .gsh on PC (Linux/WSL/Docker only, recommended):
 
-### Example:
+#### Compilation:
+1. Follow the [build instructions](#how-to-compile) to compile for your OS or see if the precompiled .elf binaries from the [GitHub Releases](https://github.com/Exzap/CafeGLSL/releases) work on your Linux installation.
+2. Use the `glslcompiler.elf` binary to compile your shaders to .gsh files. The usage is as follows:
+```bash
+# Example
+glslcompiler -ps ./input/crt.ps -vs ./input/crt.vs -o ./output/crt.gsh
 
-To initialize the compiler:
-```c
-GLSL_Init();
+# Usage:
+Usage: shader_compiler [options]
+Options:
+  -ps <file>        : Pixel shader file (can be used multiple times to pack multiple shaders into .gsh file)
+  -vs <file>        : Vertex shader file (can be used multiple times  to pack multiple shaders into .gsh file)
+  -o <file>         : Output path for .gsh file (default: no file is written)
+  -t                : Run tests
+  -v                : Verbose output (prints assembly and debug information)
 ```
 
-To compile shaders:
+#### Usage:
+
+The output will be a .gsh file that you can use in your Wii U project. The .gsh file contains the compiled shaders and can be used with the WHB library:
+```c++
+// One serialized .gsh with 1 vertex and 1 pixel shader
+WHBGfxShaderGroup whbShaderGroup = {};
+auto whbShaderGroup = WHBGfxLoadGFDShaderGroup(&whbShaderGroup, 0, shaderFileBuffer.data());
+
+// Two serialized .gsh with 1 vertex and 1 pixel shader each
+GX2VertexShader* vs = WHBGfxLoadGFDVertexShader(0, pixelShaderFileBuffer.data());
+GX2PixelShader* ps = WHBGfxLoadGFDPixelShader(0, vertexShaderFileBuffer.data());
+
+// Serialized .gsh with 2 vertex and 2 pixel shaders
+GX2VertexShader* vs1 = WHBGfxLoadGFDVertexShader(0, shaderFileBuffer.data());
+GX2VertexShader* vs2 = WHBGfxLoadGFDVertexShader(1, shaderFileBuffer.data());
+GX2PixelShader* ps1 = WHBGfxLoadGFDPixelShader(0, shaderFileBuffer.data());
+GX2PixelShader* ps2 = WHBGfxLoadGFDPixelShader(1, shaderFileBuffer.data());
+```
+
+### Dynamically compile shaders at runtime on the Wii U (.rpl):
+
+1. Copy [cafecompiler/CafeGLSLCompiler.h](cafecompiler/CafeGLSLCompiler.h) into your project's source directory and include it.
+2. Download `glslcompiler.rpl` from the [Github Releases](https://github.com/Exzap/CafeGLSL/releases) and install it using these platform-specific steps.
+   - For Aroma: Copy glslcompiler.rpl to `sd:/wiiu/libs/glslcompiler.rpl` (you can customize the location inside the header).
+   - For Cemu: Open Cemu's data folder (open Cemu, then use the `File`->`Open Cemu folder` menu option). Create a folder called `cafeLibs` and copy the glslcompiler.rpl into it.
+   - For Decaf and Cemu: Copy `glslcompiler.rpl` into the code folder of the title, next to the application's .rpx, app.xml and cos.xml files (mimicking an unpacked title). Note that the shaders currently cause Decaf to assert.
+
+#### Compilation & Usage:
 ```c
+// Initialize the GLSL compiler (requires the glslcompiler.rpl to be installed, see above)
+GLSL_Init();
+
+// Example method to compile shaders into a WHBGfxShaderGroup
 WHBGfxShaderGroup* GLSL_CompileShader(const char* vsSrc, const char* psSrc) 
 {
     char infoLog[1024];
@@ -60,8 +99,6 @@ WHBGfxShaderGroup* GLSL_CompileShader(const char* vsSrc, const char* psSrc)
 
 ## How to compile
 
-**Note**: If you just want to use the shader compiler in your project, you can grab a precompiled binary from the releases page.
-
 Setup a Linux or WSL environment in the usual way for Wii U homebrew development. Then additionally you need:
 1. **Meson** - Mesa uses the Meson build system. You can get it from your system package manager.
 2. For Meson and Mesa you need these additional system packages (the names may differ on non-Debian based distros):
@@ -71,10 +108,17 @@ Setup a Linux or WSL environment in the usual way for Wii U homebrew development
     - `dkp-toolchain-vars`
 4. ⚠️ Requires WUT with the changes from [PR 325](https://github.com/devkitPro/wut/pull/325). As of writing this, the PR has not yet been merged. 
 
-Compile for Wii U using:
-   ```bash
-   ./cafecompiler/compile_for_cafe.sh
-   ```
+Compile glslcompiler.rpl for Wii U using:
+```bash
+./cafecompiler/compile_for_cafe.sh
+```
+See the `./build-cafe/cafecompiler/` folder for the output with the .rpl file.
+
+Compile glslcompiler.elf for PC using:
+```bash
+./cafecompiler/compile_for_host.sh
+```
+See the `./build-host/cafecompiler/` folder for the output with the .elf file.
 
 ## Troubleshooting and contributing
 
@@ -85,3 +129,4 @@ I would also appreciate any help with this project and PRs are very welcome!
 
 For original Mesa code see [https://docs.mesa3d.org/license.html](https://docs.mesa3d.org/license.html)  
 Any additions by this fork are licensed under MIT.
+Thanks to exjam for granting permission to use Decaf's libgfd code.

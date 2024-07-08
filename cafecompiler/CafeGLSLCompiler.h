@@ -18,6 +18,7 @@ enum GLSL_COMPILER_FLAG
     // reserved for future use
     GLSL_COMPILER_FLAG_NONE = 0,
     GLSL_COMPILER_FLAG_GENERATE_DISASSEMBLY = 1 << 0, // write disassembly to stderr
+    GLSL_COMPILER_FLAG_PRINT_DISASSEMBLY_TO_STDERR = 1 << 0,
 };
 
 inline GX2VertexShader* (*GLSL_CompileVertexShader)(const char* shaderSource, char* infoLogOut, int infoLogMaxLength, GLSL_COMPILER_FLAG flags);

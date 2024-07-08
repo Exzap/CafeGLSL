@@ -11,10 +11,15 @@ files_cafecompiler = files(
 'cafe_glsl_compiler.cpp', 
 'cafe_glsl_compiler.h',
 'api.cpp',
-'tests.cpp'
+'tests.cpp',
+'tests.h',
+'libgfd/gfd_gx2.h',
+'libgfd/gfd.h',
+'libgfd/gfd_write.cpp',
+'main.cpp',
 )
 
-cafeglslcompiler = executable('glslcompiler', [files_cafecompiler],
+cafeglslcompiler = executable('glslcompiler.elf', [files_cafecompiler],
   include_directories : [
     inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common,
   ],
