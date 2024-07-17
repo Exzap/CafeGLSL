@@ -1,5 +1,4 @@
 #pragma once
-#include "gfd_gx2.h"
 #include "./../gx2_definitions.h"
 
 #include <cstdint>

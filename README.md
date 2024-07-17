@@ -99,15 +99,20 @@ WHBGfxShaderGroup* GLSL_CompileShader(const char* vsSrc, const char* psSrc)
 
 ## How to compile
 
-Setup a Linux or WSL environment in the usual way for Wii U homebrew development. Then additionally you need:
+#### Requirements for compiling the linux .elf (for the CLI) or Wii U .rpl file (for use as a runtime library):
 1. **Meson** - Mesa uses the Meson build system. You can get it from your system package manager.
 2. For Meson and Mesa you need these additional system packages (the names may differ on non-Debian based distros):
     - python3, python3-setuptools, python3-mako, bison, flex
-3. Additional dependencies from **devkitPro pacman**:
-    - `dkp-meson-scripts`
-    - `dkp-toolchain-vars`
-4. ⚠️ Requires WUT with the changes from [PR 325](https://github.com/devkitPro/wut/pull/325). As of writing this, the PR has not yet been merged. 
 
+#### Additional requirements for compiling a Wii U .rpl file:
+
+3. **devkitPro** - You need to have devkitPro installed. Follow the instructions on their website: [https://devkitpro.org/wiki/Getting_Started](https://devkitpro.org/wiki/Getting_Started)
+
+4. Install the regular Wii U homebrew libraries using `(dkp-)pacman -S wiiu-dev dkp-meson-scripts`. When prompted, install all packages from the `wiiu` group.
+
+5. ⚠️ Requires WUT with the changes from [PR 388](https://github.com/devkitPro/wut/pull/388). As of writing this, the PR has not yet been merged, so you'll need to [build this fork of wut from source](https://github.com/Crementif/wut/tree/new_rpl_fixes?tab=readme-ov-file#building-from-source).
+
+#### Compilation commands:
 Compile glslcompiler.rpl for Wii U using:
 ```bash
 ./cafecompiler/compile_for_cafe.sh
