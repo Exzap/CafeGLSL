@@ -7,14 +7,30 @@ path_elf2rpl = dkp_root + '/tools/bin/elf2rpl'
 path_rplimportgen = dkp_root + '/tools/bin/rplimportgen'
 path_rplexportgen = dkp_root + '/tools/bin/rplexportgen'
 
+files_cafecompiler_lib = files(
+  'libgfd/gfd.h',
+  'libgfd/gfd_write.cpp',
+  'cafe_glsl_compiler.cpp',
+  'cafe_glsl_compiler.h',
+  'tests.cpp',
+  'tests.h',
+  'api.cpp',
+
+)
+
+libglslcompiler = static_library(
+  'glslcompiler',
+  [files_cafecompiler_lib],
+  include_directories: [inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common],
+  link_with: [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
+  dependencies: [dep_libdrm_radeon, idep_nir, idep_nir_headers, idep_mesautil, driver_r600, dep_zlib],
+  override_options: ['cpp_std=c++17'],
+  gnu_symbol_visibility: 'hidden',
+  build_by_default: true,
+  install: true,
+)
+
 files_cafecompiler = files(
-'cafe_glsl_compiler.cpp', 
-'cafe_glsl_compiler.h',
-'api.cpp',
-'tests.cpp',
-'tests.h',
-'libgfd/gfd.h',
-'libgfd/gfd_write.cpp',
 'main.cpp',
 )
 
@@ -22,7 +38,7 @@ cafeglslcompiler = executable('glslcompiler.elf', [files_cafecompiler],
   include_directories : [
     inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common,
   ],
-  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
+  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600, libglslcompiler],
   dependencies: [dep_libdrm_radeon, dep_elf, idep_nir, idep_nir_headers, idep_mesautil, driver_r600],
   override_options: ['cpp_std=c++17'],
   gnu_symbol_visibility : 'hidden',
