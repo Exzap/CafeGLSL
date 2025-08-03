@@ -13,6 +13,7 @@ This library is still in its experimental stage. While it lacks some features an
 - Supports only separable shaders. All binding locations for textures, in/out varyings and uniform buffers need to be explicit
 - No support for geometry/compute/tesselation shaders
 - No uniform register support, all uniforms are read via buffers. Uniforms declared outside of blocks will be mapped to a virtual block bound to buffer 15.
+  - Make sure to call `GX2SetShaderMode(GX2_SHADER_MODE_UNIFORM_BLOCK);` in your code, or else the Wii U (Cemu is unaffected) won't read your uniform block data.
 
 Shaders may still compile even if you break these rules, but they will likely not function as you expect.
 
