@@ -14,6 +14,7 @@
 
 // C headers
 #define __cplusplusTMP __cplusplus
+#define _WCHAR_T wchar_t
 #undef __cplusplus
 extern "C"
 {
