@@ -14,7 +14,9 @@
 
 // C headers
 #define __cplusplusTMP __cplusplus
+#ifdef __APPLE__
 #define _WCHAR_T wchar_t
+#endif
 #undef __cplusplus
 extern "C"
 {
