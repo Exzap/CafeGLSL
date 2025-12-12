@@ -920,13 +920,21 @@ r600_htile_enabled(struct r600_texture *tex, unsigned level)
 	return tex->htile_offset && level == 0;
 }
 
+#ifndef _MSC_VER
 #define COMPUTE_DBG(rscreen, fmt, args...) \
 	do { \
 		if ((rscreen->b.debug_flags & DBG_COMPUTE)) fprintf(stderr, fmt, ##args); \
 	} while (0);
-
 #define R600_ERR(fmt, args...) \
 	fprintf(stderr, "EE %s:%d %s - " fmt, __FILE__, __LINE__, __func__, ##args)
+#else
+#define COMPUTE_DBG(rscreen, ...) \
+	do { \
+		if ((rscreen->b.debug_flags & DBG_COMPUTE)) fprintf(stderr, __VA_ARGS__); \
+	} while (0);
+#define R600_ERR(...) \
+	fprintf(stderr, "EE %s:%d %s ", __FILE__, __LINE__, __func__); fprintf(stderr, __VA_ARGS__)
+#endif
 
 /* For MSAA sample positions. */
 #define FILL_SREG(s0x, s0y, s1x, s1y, s2x, s2y, s3x, s3y)  \

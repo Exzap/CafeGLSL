@@ -29,6 +29,7 @@
  * This was originally in glapi.c but refactored out.
  */
 
+#define _GLAPI_DLL_EXPORTS
 
 #include <assert.h>
 #include <string.h>
@@ -46,7 +47,7 @@
  */
 
 
-#if !defined(DISPATCH_FUNCTION_SIZE) 
+#if !defined(DISPATCH_FUNCTION_SIZE)
 # define NEED_FUNCTION_POINTER
 #endif
 #include "glprocs.h"
@@ -168,7 +169,7 @@ struct _glapi_function {
 
    /**
     * Pointer to the dispatch stub for the named function.
-    * 
+    *
     * \todo
     * The semantic of this field should be changed slightly.  Currently, it
     * is always expected to be non-\c NULL.  However, it would be better to
@@ -258,9 +259,9 @@ str_dup(const char *str)
  * calls \c _glapi_add_dispatch we'll put in the proper offset.  If that
  * never happens, and the user calls this function, he'll segfault.  That's
  * what you get when you try calling a GL function that doesn't really exist.
- * 
+ *
  * \param funcName  Name of the function to create an entry-point for.
- * 
+ *
  * \sa _glapi_add_entrypoint
  */
 
@@ -323,7 +324,7 @@ set_entry_info( struct _glapi_function * entry, const char * signature, unsigned
 
 /**
  * Fill-in the dispatch stub for the named function.
- * 
+ *
  * This function is intended to be called by a hardware driver.  When called,
  * a dispatch stub may be created for the function.  A pointer to this
  * dispatch function will be returned by glXGetProcAddress.
@@ -361,16 +362,14 @@ set_entry_info( struct _glapi_function * entry, const char * signature, unsigned
  * \todo
  * Determine if code should be added to reject function names that start with
  * 'glX'.
- * 
+ *
  * \bug
  * Add code to compare \c parameter_signature with the parameter signature of
  * a static function.  In order to do that, we need to find a way to \b get
  * the parameter signature of a static function.
  */
 
-int
-_glapi_add_dispatch( const char * const * function_names,
-		     const char * parameter_signature )
+_GLAPI_EXPORT int _glapi_add_dispatch( const char * const * function_names, const char * parameter_signature )
 {
    static int next_dynamic_offset = FIRST_DYNAMIC_OFFSET;
    const char * const real_sig = (parameter_signature != NULL)
@@ -482,8 +481,7 @@ _glapi_add_dispatch( const char * const * function_names,
 /**
  * Return offset of entrypoint for named function within dispatch table.
  */
-GLint
-_glapi_get_proc_offset(const char *funcName)
+_GLAPI_EXPORT GLint _glapi_get_proc_offset(const char *funcName)
 {
    GLint offset;
 
@@ -503,8 +501,7 @@ _glapi_get_proc_offset(const char *funcName)
  * in the name of static functions, try generating a new API entrypoint on
  * the fly with assembly language.
  */
-_glapi_proc
-_glapi_get_proc_address(const char *funcName)
+_GLAPI_EXPORT _glapi_proc _glapi_get_proc_address(const char *funcName)
 {
    _glapi_proc func;
    struct _glapi_function * entry;
@@ -538,8 +535,7 @@ _glapi_get_proc_address(const char *funcName)
  * Return the name of the function at the given dispatch offset.
  * This is only intended for debugging.
  */
-const char *
-_glapi_get_proc_name(GLuint offset)
+_GLAPI_EXPORT const char * _glapi_get_proc_name(GLuint offset)
 {
    const char * n;
 
@@ -564,8 +560,7 @@ _glapi_get_proc_name(GLuint offset)
  * Return size of dispatch table struct as number of functions (or
  * slots).
  */
-GLuint
-_glapi_get_dispatch_table_size(void)
+_GLAPI_EXPORT GLuint _glapi_get_dispatch_table_size(void)
 {
    /*
     * The dispatch table size (number of entries) is the size of the

@@ -9,7 +9,15 @@
 #include <vector>
 #include <string>
 #include <cstring>
+
+#ifndef _MSC_VER
 #include <unistd.h>
+#else
+#include <io.h>
+#define close _close
+#define dup _dup
+#define dup2 _dup2
+#endif
 
 void PrintUsage()
 {
@@ -175,7 +183,7 @@ int main(int argc, char *argv[])
 
     if (runTests)
     {
-        return RunTests();        
+        return RunTests();
     }
 
 

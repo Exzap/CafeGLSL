@@ -189,7 +189,7 @@ _mesa_array_format_get_datatype(mesa_array_format f)
 static inline int
 _mesa_array_format_datatype_get_size(enum mesa_array_format_datatype type)
 {
-   return 1 << (type & MESA_ARRAY_FORMAT_TYPE_SIZE_MASK);
+   return 1 << ((int) type & (int) MESA_ARRAY_FORMAT_TYPE_SIZE_MASK);
 }
 
 static inline int

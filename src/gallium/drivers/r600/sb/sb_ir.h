@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <stdint.h>
+#include <iterator>
 #include <vector>
 #include <set>
 #include <algorithm>

@@ -38,6 +38,10 @@
 #include "sb_shader.h"
 #include "sb_pass.h"
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 namespace r600_sb {
 
 class regbits {
@@ -156,7 +160,18 @@ sel_chan regbits::find_free_bit() {
 	if (elt >= size)
 		return 0;
 
+#ifndef _MSC_VER
 	bit = __builtin_ctz(dta[elt]) + (elt << bt_index_shift);
+#else
+	unsigned ctz;
+	unsigned long trailing_zeros = 0;
+	if (_BitScanForward(&trailing_zeros, dta[elt])) {
+		ctz = static_cast<unsigned>(trailing_zeros);
+	} else {
+		ctz = 0;
+	}
+	bit = ctz + (elt << bt_index_shift);
+#endif
 
 	assert(bit < ((MAX_GPR - num_temps) << 2));
 
@@ -200,7 +215,18 @@ sel_chan regbits::find_free_chans(unsigned mask) {
 				return 0;
 		}
 
+#ifndef _MSC_VER
 		unsigned p = __builtin_ctz(cd) & ~(basetype)3u;
+#else
+		unsigned ctz;
+		unsigned long trailing_zeros = 0;
+		if (_BitScanForward(&trailing_zeros, cd)) {
+			ctz = static_cast<unsigned>(trailing_zeros);
+		} else {
+			ctz = 0;
+		}
+		unsigned p = ctz & ~(basetype)3u;
+#endif
 
 		assert (p <= bt_bits - bit);
 		bit += p;
@@ -235,14 +261,36 @@ sel_chan regbits::find_free_chan_by_mask(unsigned mask) {
 				return 0;
 		}
 
+#ifndef _MSC_VER
 		unsigned p = __builtin_ctz(cd) & ~(basetype)3u;
+#else
+		unsigned ctz;
+		unsigned long trailing_zeros = 0;
+		if (_BitScanForward(&trailing_zeros, cd)) {
+			ctz = static_cast<unsigned>(trailing_zeros);
+		} else {
+			ctz = 0;
+		}
+		unsigned p = ctz & ~(basetype)3u;
+#endif
 
 		assert (p <= bt_bits - bit);
 		bit += p;
 		cd >>= p;
 
 		if (cd & mask) {
+#ifndef _MSC_VER
 			unsigned nb = __builtin_ctz(cd & mask);
+#else
+			unsigned ctz;
+			unsigned long trailing_zeros = 0;
+			if (_BitScanForward(&trailing_zeros, cd & mask)) {
+				ctz = static_cast<unsigned>(trailing_zeros);
+			} else {
+				ctz = 0;
+			}
+			unsigned nb = ctz;
+#endif
 			unsigned ofs = ((elt << bt_index_shift) | bit);
 			return nb + ofs + 1;
 		}
@@ -514,7 +562,7 @@ bool ra_init::color(value* v) {
 	} else {
 		unsigned cm = get_preferable_chan_mask();
 		c = rb.find_free_chan_by_mask(cm);
-	}    
+	}
 
         if (!c || c.sel() >= 128 - ctx.alu_temp_gprs)
            return false;

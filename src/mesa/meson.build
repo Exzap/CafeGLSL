@@ -465,6 +465,11 @@ if with_platform_windows
     _mesa_windows_args += '-D_GLAPI_NO_EXPORTS'
   endif
 endif
+if host_machine.system() == 'windows'
+  if not with_shared_glapi
+    _mesa_windows_args += '-D_GLAPI_NO_EXPORTS'
+  endif
+endif
 
 libmesa = static_library(
   'mesa',
@@ -480,4 +485,3 @@ libmesa = static_library(
   dependencies : [idep_nir_headers, dep_vdpau, idep_mesautil],
   build_by_default : false,
 )
-

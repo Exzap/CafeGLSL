@@ -930,7 +930,7 @@ typedef struct pipe_screen *(*radeon_screen_create_t)(struct radeon_winsys *,
 struct radeon_winsys *
 amdgpu_winsys_create(int fd, const struct pipe_screen_config *config,
 		     radeon_screen_create_t screen_create);
-struct radeon_winsys *
+PUBLIC struct radeon_winsys *
 radeon_drm_winsys_create(int fd, const struct pipe_screen_config *config,
 			 radeon_screen_create_t screen_create);
 

@@ -447,7 +447,18 @@ unsigned sb_bitset::find_bit(unsigned start) {
 	while (w < sz) {
 		basetype d = data[w] >> b;
 		if (d != 0) {
+#ifndef _MSC_VER
 			unsigned pos = __builtin_ctz(d) + b + w * bt_bits;
+#else
+			unsigned ctz;
+			unsigned long trailing_zeros = 0;
+			if (_BitScanForward(&trailing_zeros, d)) {
+				ctz = static_cast<unsigned>(trailing_zeros);
+			} else {
+				ctz = 0;
+			}
+			unsigned pos = ctz + b + w * bt_bits;
+#endif
 			return pos;
 		}
 

@@ -513,12 +513,12 @@ _mesa_glsl_msg(const YYLTYPE *locp, _mesa_glsl_parse_state *state,
                GLenum type, const char *fmt, va_list ap)
 {
    bool error = (type == MESA_DEBUG_TYPE_ERROR);
-   GLuint msg_id = 0;
+   //GLuint msg_id = 0;
 
    assert(state->info_log != NULL);
 
    /* Get the offset that the new message will be written to. */
-   int msg_offset = strlen(state->info_log);
+   //int msg_offset = strlen(state->info_log);
 
    if (locp->path) {
       ralloc_asprintf_append(&state->info_log, "\"%s\"", locp->path);
@@ -531,8 +531,8 @@ _mesa_glsl_msg(const YYLTYPE *locp, _mesa_glsl_parse_state *state,
 
    ralloc_vasprintf_append(&state->info_log, fmt, ap);
 
-   const char *const msg = &state->info_log[msg_offset];
-   struct gl_context *ctx = state->ctx;
+   //const char *const msg = &state->info_log[msg_offset];
+   //struct gl_context *ctx = state->ctx;
 
    /* Report the error via GL_ARB_debug_output. */
    //_mesa_shader_debug(ctx, type, &msg_id, msg);

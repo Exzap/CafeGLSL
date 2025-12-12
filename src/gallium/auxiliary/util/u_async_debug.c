@@ -41,7 +41,8 @@ u_async_debug_message(void *data, unsigned *id, enum util_debug_type type,
    int r;
 
 	assert(false);
-   r = 0;//vasprintf(&text, fmt, args);
+   r = 0;
+   vasprintf(&text, fmt, args);
    if (r < 0)
       return;
 
@@ -112,4 +113,3 @@ _u_async_debug_drain(struct util_async_debug_callback *adbg,
    adbg->count = 0;
    simple_mtx_unlock(&adbg->lock);
 }
-

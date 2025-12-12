@@ -48,7 +48,10 @@
  *                 drivers!  No changes to the public glapi interface.
  */
 
+#define _GLAPI_DLL_EXPORTS
+
 #include "c11/threads.h"
+#include "glapi/glapi.h"
 #include "util/u_thread.h"
 #include "u_current.h"
 
@@ -98,14 +101,12 @@ const void *_glapi_Context;
 /*@}*/
 
 /* not used, but defined for compatibility */
-void
-_glapi_destroy_multithread(void)
+_GLAPI_EXPORT void _glapi_destroy_multithread(void)
 {
 }
 
 /* not used, but defined for compatibility */
-void
-_glapi_check_multithread(void)
+_GLAPI_EXPORT void _glapi_check_multithread(void)
 {
 }
 
@@ -114,8 +115,7 @@ _glapi_check_multithread(void)
  * The context pointer is an opaque type which should be cast to
  * void from the real context pointer type.
  */
-void
-_glapi_set_context(void *ptr)
+_GLAPI_EXPORT void _glapi_set_context(void *ptr)
 {
    _glapi_tls_Context = ptr;
 }
@@ -125,8 +125,7 @@ _glapi_set_context(void *ptr)
  * The context pointer is an opaque type which should be cast from
  * void to the real context pointer type.
  */
-void *
-_glapi_get_context(void)
+_GLAPI_EXPORT void * _glapi_get_context(void)
 {
    return _glapi_tls_Context;
 }
@@ -136,8 +135,7 @@ _glapi_get_context(void)
  * If the dispatch parameter is NULL we'll plug in the no-op dispatch
  * table (__glapi_noop_table).
  */
-void
-_glapi_set_dispatch(struct _glapi_table *tbl)
+_GLAPI_EXPORT void _glapi_set_dispatch(struct _glapi_table *tbl)
 {
    stub_init_once();
 
@@ -150,8 +148,7 @@ _glapi_set_dispatch(struct _glapi_table *tbl)
 /**
  * Return pointer to current dispatch table for calling thread.
  */
-struct _glapi_table *
-_glapi_get_dispatch(void)
+_GLAPI_EXPORT struct _glapi_table * _glapi_get_dispatch(void)
 {
    return _glapi_tls_Dispatch;
 }

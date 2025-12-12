@@ -37,8 +37,13 @@
 #include "winsys/radeon_winsys.h"
 #include "vl/vl_video_buffer.h"
 
+#ifndef _MSC_VER
 #define RVID_ERR(fmt, args...) \
 	fprintf(stderr, "EE %s:%d %s UVD - "fmt, __FILE__, __LINE__, __func__, ##args)
+#else
+#define RVID_ERR(...) \
+	fprintf(stderr, "EE %s:%d %s UVD - ", __FILE__, __LINE__, __func__); fprintf(stderr, __VA_ARGS__)
+#endif
 
 /* video buffer representation */
 struct rvid_buffer

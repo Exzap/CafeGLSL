@@ -1180,7 +1180,7 @@ static void r600_query_hw_add_result(struct r600_common_screen *rscreen,
 		for (unsigned i = 0; i < max_rbs; ++i) {
 			unsigned results_base = i * 16;
 			result->u64 +=
-				r600_query_read_result(buffer + results_base, 0, 2, true);
+				r600_query_read_result((char*) buffer + results_base, 0, 2, true);
 		}
 		break;
 	}
@@ -1189,7 +1189,7 @@ static void r600_query_hw_add_result(struct r600_common_screen *rscreen,
 		for (unsigned i = 0; i < max_rbs; ++i) {
 			unsigned results_base = i * 16;
 			result->b = result->b ||
-				r600_query_read_result(buffer + results_base, 0, 2, true) != 0;
+				r600_query_read_result((char*) buffer + results_base, 0, 2, true) != 0;
 		}
 		break;
 	}
@@ -1351,7 +1351,7 @@ bool r600_query_hw_get_result(struct r600_common_context *rctx,
 			return false;
 
 		while (results_base != qbuf->results_end) {
-			query->ops->add_result(rscreen, query, map + results_base,
+			query->ops->add_result(rscreen, query, (char*)map + results_base,
 					       result);
 			results_base += query->result_size;
 		}
@@ -1836,7 +1836,7 @@ void r600_query_fix_enabled_rb_mask(struct r600_common_screen *rscreen)
 	uint32_t *results;
 	unsigned i, mask = 0;
 	unsigned max_rbs;
-	
+
 	if (ctx->family == CHIP_JUNIPER) {
 		/*
 		 * Fix for predication lockups - the chip can only ever have
@@ -1857,7 +1857,7 @@ void r600_query_fix_enabled_rb_mask(struct r600_common_screen *rscreen)
 	 * associated data on eg/cm, only on r600/r700, hence ignore the valid
 	 * bit there if the map is zero.
 	 * (Albeit some chips with just one active rb can have a valid 0 map.)
-	 */ 
+	 */
 	if (rscreen->info.r600_gb_backend_map_valid &&
 	    (ctx->gfx_level < EVERGREEN || rscreen->info.r600_gb_backend_map != 0)) {
 		unsigned num_tile_pipes = rscreen->info.num_tile_pipes;

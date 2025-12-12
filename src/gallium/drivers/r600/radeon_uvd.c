@@ -34,7 +34,9 @@
 #include <sys/types.h>
 #include <assert.h>
 #include <errno.h>
+#ifndef _MSC_VER
 #include <unistd.h>
+#endif
 #include <stdio.h>
 
 #include "pipe/p_video_codec.h"
@@ -153,7 +155,7 @@ static void map_msg_fb_it_buf(struct ruvd_decoder *dec)
 
 	/* and map it for CPU access */
 	ptr = dec->ws->buffer_map(dec->ws, buf->res->buf, &dec->cs,
-                                  PIPE_MAP_WRITE | RADEON_MAP_TEMPORARY);
+                                  (unsigned) PIPE_MAP_WRITE | (unsigned) RADEON_MAP_TEMPORARY);
 
 	/* calc buffer offsets */
 	dec->msg = (struct ruvd_msg *)ptr;
@@ -787,7 +789,12 @@ static void get_mjpeg_slice_header(struct ruvd_decoder *dec, struct pipe_mjpeg_p
 	bs = (uint16_t*)&buf[len_pos];
 	*bs = util_bswap16(size - saved_size - 2);
 
+// MSVC can't add to void*
+#ifndef _MSC_VER
 	dec->bs_ptr += size;
+#else
+	dec->bs_ptr = ((char*)dec->bs_ptr) + size;
+#endif
 	dec->bs_size += size;
 }
 
@@ -842,7 +849,7 @@ static void ruvd_begin_frame(struct pipe_video_codec *decoder,
 	dec->bs_size = 0;
 	dec->bs_ptr = dec->ws->buffer_map(dec->ws,
 		dec->bs_buffers[dec->cur_buffer].res->buf,
-		&dec->cs, PIPE_MAP_WRITE | RADEON_MAP_TEMPORARY);
+		&dec->cs, (unsigned) PIPE_MAP_WRITE | (unsigned) RADEON_MAP_TEMPORARY);
 }
 
 /**
@@ -896,24 +903,36 @@ static void ruvd_decode_bitstream(struct pipe_video_codec *decoder,
 			}
 
 			dec->bs_ptr = dec->ws->buffer_map(dec->ws, buf->res->buf, &dec->cs,
-							  PIPE_MAP_WRITE |
-							  RADEON_MAP_TEMPORARY);
+							  (unsigned) PIPE_MAP_WRITE |
+							  (unsigned) RADEON_MAP_TEMPORARY);
 			if (!dec->bs_ptr)
 				return;
 
+#ifndef _MSC_VER
 			dec->bs_ptr += dec->bs_size;
+#else
+			dec->bs_ptr = ((char*) dec->bs_ptr) + dec->bs_size;
+#endif
 		}
 
 		memcpy(dec->bs_ptr, buffers[i], sizes[i]);
 		dec->bs_size += sizes[i];
+#ifndef _MSC_VER
 		dec->bs_ptr += sizes[i];
+#else
+		dec->bs_ptr = ((char*) dec->bs_ptr) + sizes[i];
+#endif
 	}
 
 	if (format == PIPE_VIDEO_FORMAT_JPEG) {
 		((uint8_t *)dec->bs_ptr)[0] = 0xff;	/* EOI */
 		((uint8_t *)dec->bs_ptr)[1] = 0xd9;
 		dec->bs_size += 2;
+#ifndef _MSC_VER
 		dec->bs_ptr += 2;
+#else
+		dec->bs_ptr = ((char*) dec->bs_ptr) + 2;
+#endif
 	}
 }
 

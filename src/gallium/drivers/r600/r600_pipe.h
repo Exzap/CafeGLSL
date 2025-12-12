@@ -824,7 +824,16 @@ void evergreen_set_lds_alloc(struct r600_context *rctx,
 			     uint32_t lds_alloc);
 
 /* r600_state_common.c */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void r600_init_common_state_functions(struct r600_context *rctx);
+
+#ifdef __cplusplus
+}
+#endif
+
 void r600_emit_cso_state(struct r600_context *rctx, struct r600_atom *atom);
 void r600_emit_alphatest_state(struct r600_context *rctx, struct r600_atom *atom);
 void r600_emit_blend_color(struct r600_context *rctx, struct r600_atom *atom);
