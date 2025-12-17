@@ -225,13 +225,29 @@ DCEVisitor::visit(Block *block)
 {
    auto i = block->begin();
    auto e = block->end();
+   size_t skip_count = 0;
    while (i != e) {
       auto n = i++;
+      auto did_erase = false;
+
       if (!(*n)->keep()) {
          (*n)->accept(*this);
          if ((*n)->is_dead()) {
             block->erase(n);
+            did_erase = true;
+
+            // Reset our iterator back up.
+            i = block->begin();
+            e = block->end();
+            for (size_t unused = 0; unused < skip_count; ++unused) {
+               i++;
+            }
+            i++;
          }
+      }
+
+      if (!did_erase) {
+         skip_count += 1;
       }
    }
 }
@@ -360,41 +376,78 @@ CopyPropFwdVisitor::visit(AluInstr *instr)
    auto src = instr->psrc(0);
    auto dest = instr->dest();
 
-   for (auto& i : dest->uses()) {
-      /* SSA can always be propagated, registers only in the same block
-       * and only if they are assigned in the same block */
-      bool can_propagate = dest->has_flag(Register::ssa);
+   // This loop will _optionally_ pop from the front.
+   //
+   // On linux a for-each loop will always properly parse this loop, e.g.
+   // it won't lose it's spot even if elements in the middle/front get popped
+   // out.
+   //
+   // Unfortunately, on macOS this loop _fails_, it will skip elements, and access
+   // elements past the end of the set, and fail. So we need to manually implement
+   // the behavior we want.
+   //
+   // In reality we should really change this loop to change and apply all the changes
+   // to the loop _outside_ of the loop, and not modify the thing we're iterating over
+   // while we're iterating over it.
+   std::set<int> seen_elements{};
+   bool processed_all = dest->uses().size() == 0;
+   bool global_break = false;
+   while (!processed_all && !global_break) {
+      auto did_process = false;
+      for (auto& i : dest->uses()) {
+         if (seen_elements.find(i->index()) != seen_elements.end()) {
+            continue;
+         }
+         auto pre_len = dest->uses().size();
+         did_process = true;
 
-      if (!can_propagate) {
+         /* SSA can always be propagated, registers only in the same block
+          * and only if they are assigned in the same block */
+         bool can_propagate = dest->has_flag(Register::ssa);
 
-         /* Register can propagate if the assigment was in the same
-          * block, and we don't have a second assignment coming later
-          * (e.g. helper invocation evaluation does
-          *
-          * 1: MOV R0.x, -1
-          * 2: FETCH R0.0 VPM
-          * 3: MOV SN.x, R0.x
-          *
-          * Here we can't prpagate the move in 1 to SN.x in 3 */
-         if ((instr->block_id() == i->block_id() && instr->index() < i->index())) {
-            can_propagate = true;
-            if (dest->parents().size() > 1) {
-               for (auto p : dest->parents()) {
-                  if (p->block_id() == i->block_id() && p->index() > instr->index()) {
-                     can_propagate = false;
-                     break;
+         if (!can_propagate) {
+            /* Register can propagate if the assigment was in the same
+             * block, and we don't have a second assignment coming later
+             * (e.g. helper invocation evaluation does
+             *
+             * 1: MOV R0.x, -1
+             * 2: FETCH R0.0 VPM
+             * 3: MOV SN.x, R0.x
+             *
+             * Here we can't prpagate the move in 1 to SN.x in 3 */
+            if ((instr->block_id() == i->block_id() && instr->index() < i->index())) {
+               can_propagate = true;
+               if (dest->parents().size() > 1) {
+                  for (auto p : dest->parents()) {
+                     if (p->block_id() == i->block_id() && p->index() > instr->index()) {
+                         can_propagate = false;
+                         global_break = true;
+                         break;
+                     }
                   }
                }
             }
          }
+
+         if (can_propagate) {
+            sfn_log << SfnLog::opt << "   Try replace in " << i->block_id() << ":"
+                    << i->index() << *i << "\n";
+            progress |= i->replace_source(dest, src);
+         }
+
+         // We only loop once and want to start again.
+         auto post_len = dest->uses().size();
+         if (pre_len != post_len) {
+            seen_elements.insert(i->index());
+         }
+         break;
       }
 
-      if (can_propagate) {
-         sfn_log << SfnLog::opt << "   Try replace in " << i->block_id() << ":"
-                 << i->index() << *i << "\n";
-         progress |= i->replace_source(dest, src);
+      if (!did_process) {
+         processed_all = true;
       }
    }
+
    if (instr->dest()) {
       sfn_log << SfnLog::opt << "has uses; " << instr->dest()->uses().size();
    }
@@ -456,7 +509,7 @@ CopyPropFwdVisitor::propagate_to(RegisterVec4& value, Instr *instr)
 			/* Parent op is not an ALU instruction, so we can't
 				copy-propagate */
 			if (!parents[i])
-				return; 
+				return;
 
          if ((parents[i]->opcode() != op1_mov) ||
              parents[i]->has_alu_flag(alu_src0_neg) ||

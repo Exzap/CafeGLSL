@@ -136,7 +136,8 @@ GX2PixelShader* _CompilePixelShader(const char* shaderSource, char* infoLogOut, 
     uint32_t programSize;
     s_compiler->GetShaderBytecode(programPtr, programSize);
 #ifndef _MSC_VER
-    ps->program = aligned_alloc(0x100, programSize);
+    size_t program_size_as_po2 = 1 << (32 - __builtin_clz(programSize - 1));
+    ps->program = aligned_alloc(0x100, program_size_as_po2 < 0x100 ? 0x100 : program_size_as_po2);
 #else
     ps->program = _aligned_malloc(programSize, 0x100);
 #endif

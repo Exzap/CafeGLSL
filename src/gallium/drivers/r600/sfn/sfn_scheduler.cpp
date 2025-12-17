@@ -35,7 +35,6 @@
 #include "sfn_instr_mem.h"
 #include "sfn_instr_tex.h"
 
-#include <algorithm>
 #include <sstream>
 
 namespace r600 {
@@ -289,7 +288,6 @@ BlockSheduler::schedule_block(Block& in_block,
    assert(m_current_block->id() >= 0);
 
    while (have_instr) {
-
       sfn_log << SfnLog::schedule << "Have ready instructions\n";
 
       if (alu_vec_ready.size())
@@ -789,7 +787,6 @@ BlockSheduler::collect_ready(CollectInstructions& available)
    result |= collect_ready_type(mem_ring_writes_ready, available.mem_ring_writes);
    result |= collect_ready_type(write_tf_ready, available.write_tf);
    result |= collect_ready_type(rat_instr_ready, available.rat_instr);
-
    sfn_log << SfnLog::schedule << "\n";
    return result;
 }
@@ -806,6 +803,7 @@ BlockSheduler::collect_ready_alu_vec(std::list<AluInstr *>& ready,
    }
 
    int max_check = 0;
+   int skip_count = 0;
    while (i != e && max_check++ < 64) {
       if (ready.size() < 64 && (*i)->ready()) {
 
@@ -849,8 +847,15 @@ BlockSheduler::collect_ready_alu_vec(std::list<AluInstr *>& ready,
          auto old_i = i;
          ++i;
          available.erase(old_i);
-      } else
+         i = available.begin();
+         e = available.end();
+         for (int unused = 0; unused < skip_count; ++unused) {
+            ++i;
+         }
+      } else {
          ++i;
+         skip_count += 1;
+      }
    }
 
    for (auto& i : ready)
@@ -917,14 +922,25 @@ BlockSheduler::collect_ready_type(std::list<T *>& ready, std::list<T *>& availab
    auto e = available.end();
 
    int lookahead = 16;
+   int skip_count = 0;
+
    while (i != e && ready.size() < 16 && lookahead-- > 0) {
       if ((*i)->ready()) {
          ready.push_back(*i);
          auto old_i = i;
          ++i;
          available.erase(old_i);
-      } else
+
+         // Need to reset ALL of our iterators.
+         i = available.begin();
+         e = available.end();
+         for (int unused = 0; unused < skip_count; ++unused) {
+            ++i;
+         }
+      } else {
+         skip_count += 1;
          ++i;
+      }
    }
 
    for (auto& i : ready)

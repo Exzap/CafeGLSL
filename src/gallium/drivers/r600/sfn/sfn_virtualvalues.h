@@ -71,7 +71,23 @@ class InlineConstant;
 class LiteralConstant;
 class UniformValue;
 
+#if defined(__APPLE__)
+// Apple's toolchain does a whacky pointer compare that _isn't_ correct
+// for us, but is allowed by the spec. That normally leads to incorrect
+// orderings, and breaks things.
+//
+// The main reason they don't just do a `<` like normal pointers is because
+// it breaks on function pointers. Since we know this _isn't_ a function
+// pointer, we can just manually override it with a comparator that does a
+// normal `<`.
+struct cmpInstr {
+  bool operator() (Instr* const& lhs, Instr* const& rhs) const;
+};
+
+using InstructionSet = std::set<Instr *, cmpInstr, Allocator<Instr *>>;
+#else
 using InstructionSet = std::set<Instr *, std::less<Instr *>, Allocator<Instr *>>;
+#endif
 
 class VirtualValue : public Allocate {
 public:

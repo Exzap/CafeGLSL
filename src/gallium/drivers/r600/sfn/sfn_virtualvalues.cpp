@@ -41,6 +41,12 @@
 
 namespace r600 {
 
+#if defined(__APPLE__)
+bool cmpInstr::operator() (Instr* const& lhs, Instr* const& rhs) const {
+  return lhs < rhs;
+}
+#endif
+
 std::ostream&
 operator<<(std::ostream& os, Pin pin)
 {
@@ -225,9 +231,7 @@ Register::del_parent_from_array(Instr *instr)
 void
 Register::add_use(Instr *instr)
 {
-   const auto& [itr, inserted] = m_uses.insert(instr);
-   {
-   }
+   auto [itr, inserted] = m_uses.insert(instr);
 
    if (inserted) {
       for (auto& p : m_parents)
