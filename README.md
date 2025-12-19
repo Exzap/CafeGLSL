@@ -30,11 +30,11 @@ This project has been confirmed to build on Linux, macOS, and Windows. You may b
 #### Compilation:
 
 1. Follow the [build instructions](#how-to-compile) to compile for your OS or see if the precompiled executable binaries from the [GitHub Releases](https://github.com/Exzap/CafeGLSL/releases) work on your platform.
-2. Use the glslcompiler executable to compile your shaders to .gsh files. The usage is as follows:
+2. Use the cafe-glslcompiler executable to compile your shaders to .gsh files. The usage is as follows:
 
 ```bash
 # Example
-glslcompiler -ps ./input/crt.ps -vs ./input/crt.vs -o ./output/crt.gsh
+cafe-glslcompiler -ps ./input/crt.ps -vs ./input/crt.vs -o ./output/crt.gsh
 
 # Usage:
 Usage: shader_compiler [options]
@@ -126,7 +126,7 @@ Compile glslcompiler.rpl for Wii U using:
 ```
 See the `./build-cafe/cafecompiler/` folder for the output with the .rpl file.
 
-Compile glslcompiler.elf for PC using either the bash script (for non windows sytems), or the powershell script (for windows systems):
+Compile cafe-glslcompiler for PC using either the bash script (for non windows sytems), or the powershell script (for windows systems):
 
 ```bash
 ./cafecompiler/compile_for_host.sh

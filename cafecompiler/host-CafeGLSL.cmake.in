@@ -1,0 +1,74 @@
+@PACKAGE_INIT@
+
+set(CMAKE_IMPORT_FILE_VERSION 1)
+
+set(_targetsDefined)
+set(_targetsNotDefined)
+set(_expectedTargets)
+foreach(_expectedTarget Cafe::Host::GLSL::Compiler)
+  list(APPEND _expectedTargets ${_expectedTarget})
+  if(NOT TARGET ${_expectedTarget})
+    list(APPEND _targetsNotDefined ${_expectedTarget})
+  endif()
+  if(TARGET ${_expectedTarget})
+    list(APPEND _targetsDefined ${_expectedTarget})
+  endif()
+endforeach()
+
+if("${_targetsDefined}" STREQUAL "${_expectedTargets}")
+  unset(_targetsDefined)
+  unset(_targetsNotDefined)
+  unset(_expectedTargets)
+  set(CMAKE_IMPORT_FILE_VERSION)
+  return()
+endif()
+
+if(NOT "${_targetsDefined}" STREQUAL "")
+  message(FATAL_ERROR "Some (but not all) targets in this export set were already defined.\nTargets Defined: ${_targetsDefined}\nTargets not yet defined: ${_targetsNotDefined}\n")
+endif()
+unset(_targetsDefined)
+unset(_targetsNotDefined)
+unset(_expectedTargets)
+
+
+get_filename_component(_IMPORT_PREFIX "${CMAKE_CURRENT_LIST_DIR}" PATH)
+if(_IMPORT_PREFIX STREQUAL "/")
+  set(_IMPORT_PREFIX "")
+endif()
+set(${CMAKE_FIND_PACKAGE_NAME}_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
+# Create imported binary
+add_executable(Cafe::Host::GLSL::Compiler IMPORTED)
+set_target_properties(Cafe::Host::GLSL::Compiler
+  PROPERTIES
+    IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/cafe-glslcompiler@CMAKE_FILE_SUFFIX@"
+    CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND} -E env --"
+)
+
+# Cleanup temporary variables.
+set(_IMPORT_PREFIX)
+
+# Loop over all imported files and verify that they actually exist
+foreach(target ${_IMPORT_CHECK_TARGETS} )
+  foreach(file ${_IMPORT_CHECK_FILES_FOR_${target}} )
+    if(NOT EXISTS "${file}" )
+      message(FATAL_ERROR "The imported target \"${target}\" references the file
+   \"${file}\"
+but this file does not exist.  Possible reasons include:
+* The file was deleted, renamed, or moved to another location.
+* An install or uninstall procedure did not complete successfully.
+* The installation package was faulty and contained
+   \"${CMAKE_CURRENT_LIST_FILE}\"
+but not all the files it references.
+")
+    endif()
+  endforeach()
+  unset(_IMPORT_CHECK_FILES_FOR_${target})
+endforeach()
+unset(_IMPORT_CHECK_TARGETS)
+
+# This file does not depend on other imported targets which have
+# been exported from the same project but in a separate export set.
+
+# Commands beyond this point should not need to know the version.
+set(CMAKE_IMPORT_FILE_VERSION)
