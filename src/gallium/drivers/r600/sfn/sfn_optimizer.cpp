@@ -376,34 +376,19 @@ CopyPropFwdVisitor::visit(AluInstr *instr)
    auto src = instr->psrc(0);
    auto dest = instr->dest();
 
-   // This loop will _optionally_ pop from the front.
-   //
-   // On linux a for-each loop will always properly parse this loop, e.g.
-   // it won't lose it's spot even if elements in the middle/front get popped
-   // out.
-   //
-   // Unfortunately, on macOS this loop _fails_, it will skip elements, and access
-   // elements past the end of the set, and fail. So we need to manually implement
-   // the behavior we want.
-   //
-   // In reality we should really change this loop to change and apply all the changes
-   // to the loop _outside_ of the loop, and not modify the thing we're iterating over
-   // while we're iterating over it.
    std::set<int> seen_elements{};
-   bool processed_all = dest->uses().size() == 0;
-   bool global_break = false;
-   while (!processed_all && !global_break) {
+   auto global_break = false;
+   while (!global_break) {
       auto did_process = false;
       for (auto& i : dest->uses()) {
          if (seen_elements.find(i->index()) != seen_elements.end()) {
             continue;
          }
-         auto pre_len = dest->uses().size();
-         did_process = true;
-
+         seen_elements.insert(i->index());
          /* SSA can always be propagated, registers only in the same block
           * and only if they are assigned in the same block */
          bool can_propagate = dest->has_flag(Register::ssa);
+         did_process = true;
 
          if (!can_propagate) {
             /* Register can propagate if the assigment was in the same
@@ -420,9 +405,9 @@ CopyPropFwdVisitor::visit(AluInstr *instr)
                if (dest->parents().size() > 1) {
                   for (auto p : dest->parents()) {
                      if (p->block_id() == i->block_id() && p->index() > instr->index()) {
-                         can_propagate = false;
-                         global_break = true;
-                         break;
+                        can_propagate = false;
+                        global_break = true;
+                        break;
                      }
                   }
                }
@@ -433,18 +418,13 @@ CopyPropFwdVisitor::visit(AluInstr *instr)
             sfn_log << SfnLog::opt << "   Try replace in " << i->block_id() << ":"
                     << i->index() << *i << "\n";
             progress |= i->replace_source(dest, src);
+            // We need to refresh dest->uses();
+            break;
          }
-
-         // We only loop once and want to start again.
-         auto post_len = dest->uses().size();
-         if (pre_len != post_len) {
-            seen_elements.insert(i->index());
-         }
-         break;
       }
 
       if (!did_process) {
-         processed_all = true;
+         global_break = true;
       }
    }
 
