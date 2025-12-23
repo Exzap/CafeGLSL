@@ -73,7 +73,7 @@ cafeglslcompiler_rpl = executable('glslcompilerrplbase', [files_cafecompiler, rp
   include_directories : [
     inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common,
   ],
-  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
+  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600, libglslcompiler],
   dependencies: [dep_libdrm_radeon, dep_elf, idep_nir, idep_nir_headers, idep_mesautil, driver_r600],
   override_options: ['cpp_std=c++17'],
   link_args: ['-specs=' + wut_root + '/share/rpl.specs'],
@@ -93,7 +93,7 @@ cafeglslcompiler_static = static_library('glslcompilerrplstatic', [files_cafecom
     inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common,
   ],
   #link_whole : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
-  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
+  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600, libglslcompiler],
   dependencies: [dep_libdrm_radeon, dep_elf, idep_nir, idep_nir_headers, idep_mesautil, driver_r600],
   override_options: ['cpp_std=c++17'],
   build_by_default: true,

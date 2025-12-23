@@ -209,10 +209,10 @@ void _FreePixelShader(GX2PixelShader* shader)
 
 void TestCompiler();
 
-#if defined(__GNUC__)
-#define API_EXPORT __attribute__ ((__used__)) __attribute__ ((visibility ("default")))
-#else
+#if defined(_MSC_VER)
 #define API_EXPORT __declspec(dllexport)
+#else
+#define API_EXPORT __attribute__ ((__used__)) __attribute__ ((visibility ("default")))
 #endif
 
 extern "C"
@@ -253,7 +253,7 @@ extern "C"
     }
 
 #if defined(__WUT__)
-    int rpl_entry(OSDynLoad_Module module, OSDynLoad_EntryReason reason)
+    API_EXPORT int rpl_entry(OSDynLoad_Module module, OSDynLoad_EntryReason reason)
     {
         if (reason == 1)
         {

@@ -33,11 +33,9 @@ inline void (*GLSL_FreeVertexShader)(GX2VertexShader* shader);
 inline void (*GLSL_FreePixelShader)(GX2PixelShader* shader);
 inline void (*__GLSL_DestroyGLSLCompiler)();
 
-#ifndef GLSL_COMPILER_CAFE_RPL
-
 // MSVC needs dllexport in all locations.
 #ifndef _MSC_VER
-#define DECLARATION_API_EXPORT
+#define DECLARATION_API_EXPORT __attribute__ ((__used__)) __attribute__ ((visibility ("default")))
 #else
 #define DECLARATION_API_EXPORT __declspec(dllexport)
 #endif
@@ -50,8 +48,7 @@ extern "C"
     DECLARATION_API_EXPORT GX2PixelShader* CompilePixelShader(const char* shaderSource, char* infoLogOut, int infoLogMaxLength, GLSL_COMPILER_FLAG flags);
     DECLARATION_API_EXPORT void FreeVertexShader(GX2VertexShader* shader);
     DECLARATION_API_EXPORT void FreePixelShader(GX2PixelShader* shader);
-};
-#endif
+}
 
 static inline bool GLSL_Init()
 {

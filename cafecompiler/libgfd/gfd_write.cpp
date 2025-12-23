@@ -41,7 +41,7 @@ constexpr bool align_check(Type value, size_t alignment)
 }
 
 template<typename Type>
-const auto byte_swap(Type value)
+const Type byte_swap(Type value)
 {
     // convert float
     if constexpr (std::is_same_v<Type, float>)

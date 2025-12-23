@@ -37,12 +37,11 @@ u_async_debug_message(void *data, unsigned *id, enum util_debug_type type,
 {
    struct util_async_debug_callback *adbg = data;
    struct util_debug_message *msg;
-   char *text;
+   //char *text = NULL;
    int r;
 
 	assert(false);
-   r = 0;
-   vasprintf(&text, fmt, args);
+   r = 0;//vasprintf(&text, fmt, args);
    if (r < 0)
       return;
 
@@ -52,14 +51,14 @@ u_async_debug_message(void *data, unsigned *id, enum util_debug_type type,
 
       if (new_max < adbg->max ||
           new_max > SIZE_MAX / sizeof(*adbg->messages)) {
-         free(text);
+         //free(text);
          goto out;
       }
 
       struct util_debug_message *new_msg =
          realloc(adbg->messages, new_max * sizeof(*adbg->messages));
       if (!new_msg) {
-         free(text);
+         //free(text);
          goto out;
       }
 
@@ -70,7 +69,7 @@ u_async_debug_message(void *data, unsigned *id, enum util_debug_type type,
    msg = &adbg->messages[adbg->count++];
    msg->id = id;
    msg->type = type;
-   msg->msg = text;
+   msg->msg = "";
 
 out:
    simple_mtx_unlock(&adbg->lock);
