@@ -80,9 +80,6 @@ emit_wpos_adjustment(lower_wpos_ytransform_state *state,
                      nir_intrinsic_instr *intr, bool invert,
                      float adjX, float adjY[2])
 {
-#if defined(__WUT__)
-    return; // avoid FragCoord transformation to prevent creation of gl_FbWposYTransform uniform var
-#endif
    nir_builder *b = &state->b;
    nir_ssa_def *wpostrans, *wpos_temp, *wpos_temp_y, *wpos_input;
 
