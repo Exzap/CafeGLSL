@@ -833,8 +833,9 @@ st_link_nir(struct gl_context *ctx,
       if (nir->info.stage == MESA_SHADER_VERTEX && !shader_program->data->spirv)
          nir_remap_dual_slot_attributes(nir, &shader->Program->DualSlotInputs);
 
-      NIR_PASS_V(nir, st_nir_lower_wpos_ytransform, shader->Program,
-                 st->screen);
+      // CafeGLSL edit: avoid transformations to prevent creation of gl_FbWposYTransform uniform var
+      // NIR_PASS_V(nir, st_nir_lower_wpos_ytransform, shader->Program,
+      //            st->screen);
 
       NIR_PASS_V(nir, nir_lower_system_values);
       NIR_PASS_V(nir, nir_lower_compute_system_values, NULL);
