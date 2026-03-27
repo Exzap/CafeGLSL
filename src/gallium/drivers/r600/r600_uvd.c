@@ -34,7 +34,9 @@
 #include <sys/types.h>
 #include <assert.h>
 #include <errno.h>
+#ifndef _MSC_VER
 #include <unistd.h>
+#endif
 
 #include "pipe/p_video_codec.h"
 

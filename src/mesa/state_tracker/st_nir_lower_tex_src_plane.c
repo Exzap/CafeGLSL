@@ -64,6 +64,10 @@ add_sampler(lower_tex_src_state *state, unsigned orig_binding,
       glsl_sampler_type(GLSL_SAMPLER_DIM_EXTERNAL, false, false, GLSL_TYPE_FLOAT);
    nir_variable *new_sampler, *orig_sampler =
          find_sampler(state, orig_binding);
+#ifdef _MSC_VER
+   // Reference to shut up MSVC.
+   (void)orig_sampler;
+#endif
    char *name;
 
    assert(false);

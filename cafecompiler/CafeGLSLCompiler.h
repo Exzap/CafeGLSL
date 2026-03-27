@@ -13,6 +13,12 @@
 inline OSDynLoad_Module s_glslCompilerModule = nullptr;
 #endif
 
+#ifndef _MSC_VER
+#include <cstdlib>
+#else
+#include <malloc.h>
+#endif
+
 enum GLSL_COMPILER_FLAG
 {
     // reserved for future use
@@ -27,17 +33,22 @@ inline void (*GLSL_FreeVertexShader)(GX2VertexShader* shader);
 inline void (*GLSL_FreePixelShader)(GX2PixelShader* shader);
 inline void (*__GLSL_DestroyGLSLCompiler)();
 
-#ifndef GLSL_COMPILER_CAFE_RPL
+// MSVC needs dllexport in all locations.
+#ifndef _MSC_VER
+#define DECLARATION_API_EXPORT __attribute__ ((__used__)) __attribute__ ((visibility ("default")))
+#else
+#define DECLARATION_API_EXPORT __declspec(dllexport)
+#endif
+
 extern "C"
 {
-    void InitGLSLCompiler();
-    void DestroyGLSLCompiler();
-    GX2VertexShader* CompileVertexShader(const char* shaderSource, char* infoLogOut, int infoLogMaxLength, GLSL_COMPILER_FLAG flags);
-    GX2PixelShader* CompilePixelShader(const char* shaderSource, char* infoLogOut, int infoLogMaxLength, GLSL_COMPILER_FLAG flags);
-    void FreeVertexShader(GX2VertexShader* shader);
-    void FreePixelShader(GX2PixelShader* shader);
-};
-#endif
+    DECLARATION_API_EXPORT void InitGLSLCompiler();
+    DECLARATION_API_EXPORT void DestroyGLSLCompiler();
+    DECLARATION_API_EXPORT GX2VertexShader* CompileVertexShader(const char* shaderSource, char* infoLogOut, int infoLogMaxLength, GLSL_COMPILER_FLAG flags);
+    DECLARATION_API_EXPORT GX2PixelShader* CompilePixelShader(const char* shaderSource, char* infoLogOut, int infoLogMaxLength, GLSL_COMPILER_FLAG flags);
+    DECLARATION_API_EXPORT void FreeVertexShader(GX2VertexShader* shader);
+    DECLARATION_API_EXPORT void FreePixelShader(GX2PixelShader* shader);
+}
 
 static inline bool GLSL_Init()
 {
@@ -85,4 +96,3 @@ static inline bool GLSL_Shutdown()
 #endif
     return true;
 }
-

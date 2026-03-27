@@ -38,6 +38,10 @@
 #include "sb_sched.h"
 #include "eg_sq.h" // V_SQ_CF_INDEX_NONE/0/1
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 namespace r600_sb {
 
 rp_kcache_tracker::rp_kcache_tracker(shader &sh) : rp(), uc(),
@@ -705,9 +709,9 @@ void alu_group_tracker::reset(bool keep_packed) {
 
 void alu_group_tracker::update_flags(alu_node* n) {
 	unsigned flags = n->bc.op_ptr->flags;
-	has_kill |= (flags & AF_KILL);
-	has_mova |= (flags & AF_MOVA);
-	has_predset |= (flags & AF_ANY_PRED);
+	has_kill |= !!(flags & AF_KILL);
+	has_mova |= !!(flags & AF_MOVA);
+	has_predset |= !!(flags & AF_ANY_PRED);
 	uses_ar |= n->uses_ar();
 	consumes_lds_oqa |= n->consumes_lds_oq();
 	produces_lds_oqa |= n->produces_lds_oq();
@@ -1653,7 +1657,15 @@ unsigned post_scheduler::try_add_instruction(node *n) {
 	if (n->is_alu_packed()) {
 		alu_packed_node *p = static_cast<alu_packed_node*>(n);
 		unsigned slots = p->get_slot_mask();
+#ifndef _MSC_VER
 		unsigned cnt = __builtin_popcount(slots);
+#else
+#ifndef _M_ARM64
+		unsigned cnt = __popcnt(slots);
+#else
+		unsigned cnt = _CountOneBits(slots);
+#endif
+#endif
 
 		if ((slots & avail_slots) != slots) {
 			PSC_DUMP( sblog << "   no slots \n"; );
@@ -1712,7 +1724,18 @@ unsigned post_scheduler::try_add_instruction(node *n) {
 			return 0;
 		}
 
+#ifndef _MSC_VER
 		slot = __builtin_ctz(allowed_slots);
+#else
+		unsigned ctz;
+		unsigned long trailing_zeros = 0;
+		if (_BitScanForward(&trailing_zeros, allowed_slots)) {
+			ctz = static_cast<unsigned>(trailing_zeros);
+		} else {
+			ctz = 0;
+		}
+		slot = ctz;
+#endif
 		a->bc.slot = slot;
 
 		PSC_DUMP( sblog << "slot: " << slot << "\n"; );

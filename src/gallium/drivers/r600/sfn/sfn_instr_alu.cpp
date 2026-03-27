@@ -2246,7 +2246,7 @@ emit_alu_op2(const nir_alu_instr& alu,
       std::swap(idx0, idx1);
    }
 
-   bool src1_negate = (opts & AluInstr::op2_opt_neg_src1) ^ src1->negate;
+   bool src1_negate = !!((opts & AluInstr::op2_opt_neg_src1) ^ (int) src1->negate);
 
    auto pin = pin_for_components(alu);
    AluInstr *ir = nullptr;
@@ -2550,7 +2550,7 @@ emit_dot4(const nir_alu_instr& alu, int nelm, Shader& shader)
       srcs[2 * i] = value_factory.src(src0, i);
       srcs[2 * i + 1] = value_factory.src(src1, i);
    }
-   
+
    for (int i = nelm; i < 4; ++i) {
        srcs[2 * i] = value_factory.zero();
        srcs[2 * i + 1] = value_factory.zero();

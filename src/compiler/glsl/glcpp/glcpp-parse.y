@@ -173,8 +173,8 @@ add_builtin_define(glcpp_parser_t *parser, const char *name, int value);
 
 %}
 
-%pure-parser
-%error-verbose
+%define api.pure
+%define parse.error verbose
 
 %locations
 %initial-action {
@@ -437,7 +437,7 @@ control_line_success:
 			_glcpp_parser_expand_and_lex_from (parser,
 							   IF_EXPANDED, $3,
 							   EXPANSION_MODE_EVALUATE_DEFINED);
-		}	
+		}
 		else
 		{
 			_glcpp_parser_skip_stack_push_if (parser, & @1, 0);
@@ -451,7 +451,7 @@ control_line_success:
 		    parser->skip_stack->type == SKIP_NO_SKIP)
 		{
 			glcpp_error(& @1, parser, "#if with no expression");
-		}	
+		}
 		_glcpp_parser_skip_stack_push_if (parser, & @1, 0);
 	}
 |	HASH_TOKEN IFDEF IDENTIFIER junk NEWLINE {
@@ -763,7 +763,7 @@ identifier_list:
 		_string_list_append_item (parser, $$, $1);
 	}
 |	identifier_list ',' IDENTIFIER {
-		$$ = $1;	
+		$$ = $1;
 		_string_list_append_item (parser, $$, $3);
 	}
 ;
