@@ -689,6 +689,9 @@ ValueFactory::dest_from_string(const std::string& s)
    }
 
    bool is_ssa = s[0] == 'S';
+#ifdef _MSC_VER
+   (void) is_ssa;
+#endif
 
    RegisterKey key(sel, chan, pool);
 

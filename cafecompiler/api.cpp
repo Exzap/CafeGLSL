@@ -88,7 +88,12 @@ GX2VertexShader* _CompileVertexShader(const char* shaderSource, char* infoLogOut
     uint32_t* programPtr;
     uint32_t programSize;
     s_compiler->GetShaderBytecode(programPtr, programSize);
-    vs->program = aligned_alloc(0x100, programSize);
+#ifndef _MSC_VER
+    size_t program_size_as_po2 = 1 << (32 - __builtin_clz(programSize - 1));
+    vs->program = aligned_alloc(0x100, program_size_as_po2 < 0x100 ? 0x100 : program_size_as_po2);
+#else
+    vs->program = _aligned_malloc(programSize, 0x100);
+#endif
     memcpy(vs->program, programPtr, programSize);
     vs->size = programSize;
 #ifdef __WUT__
@@ -115,7 +120,7 @@ GX2VertexShader* _CompileVertexShader(const char* shaderSource, char* infoLogOut
     DebugLog("_CompileVertexShader debug printing regs:");
     for(int i=0; i<sizeof(CafeGLSLCompiler::VSRegs)/4; i++)
     {
-		DebugLog("0x%02x: %08x", i*4, ((unsigned int*)&vs->regs)[i]);		
+		DebugLog("0x%02x: %08x", i*4, ((unsigned int*)&vs->regs)[i]);
 	}
      */
     return vs;
@@ -131,7 +136,12 @@ GX2PixelShader* _CompilePixelShader(const char* shaderSource, char* infoLogOut, 
     uint32_t* programPtr;
     uint32_t programSize;
     s_compiler->GetShaderBytecode(programPtr, programSize);
-    ps->program = aligned_alloc(0x100, programSize);
+#ifndef _MSC_VER
+    size_t program_size_as_po2 = 1 << (32 - __builtin_clz(programSize - 1));
+    ps->program = aligned_alloc(0x100, program_size_as_po2 < 0x100 ? 0x100 : program_size_as_po2);
+#else
+    ps->program = _aligned_malloc(programSize, 0x100);
+#endif
     memcpy(ps->program, programPtr, programSize);
     ps->size = programSize;
 #ifdef __WUT__
@@ -156,7 +166,7 @@ GX2PixelShader* _CompilePixelShader(const char* shaderSource, char* infoLogOut, 
     DebugLog("_CompilePixelShader debug printing regs:");
     for(int i=0; i<sizeof(CafeGLSLCompiler::PSRegs)/4; i++)
     {
-		DebugLog("0x%02x: %08x", i*4, ((unsigned int*)&ps->regs)[i]);		
+		DebugLog("0x%02x: %08x", i*4, ((unsigned int*)&ps->regs)[i]);
 	}
      */
     return ps;
@@ -201,7 +211,11 @@ void _FreePixelShader(GX2PixelShader* shader)
 
 void TestCompiler();
 
-#define API_EXPORT     __attribute__ ((__used__)) __attribute__ ((visibility ("default")))
+#if defined(_MSC_VER)
+#define API_EXPORT __declspec(dllexport)
+#else
+#define API_EXPORT __attribute__ ((__used__)) __attribute__ ((visibility ("default")))
+#endif
 
 extern "C"
 {
@@ -241,7 +255,7 @@ extern "C"
     }
 
 #if defined(__WUT__)
-    int rpl_entry(OSDynLoad_Module module, OSDynLoad_EntryReason reason)
+    API_EXPORT int rpl_entry(OSDynLoad_Module module, OSDynLoad_EntryReason reason)
     {
         if (reason == 1)
         {
@@ -257,5 +271,3 @@ extern "C"
 #endif
 
 };
-
-

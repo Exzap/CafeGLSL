@@ -27,6 +27,10 @@
 #ifndef SB_SCHED_H_
 #define SB_SCHED_H_
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 namespace r600_sb {
 
 typedef sb_map<node*, unsigned> uc_map;
@@ -161,7 +165,15 @@ public:
 	}
 
 	unsigned inst_count() {
+#ifndef _MSC_VER
 		return __builtin_popcount(used_slots());
+#else
+#ifndef _M_ARM64
+		return __popcnt(used_slots());
+#else
+		return _CountOneBits(used_slots());
+#endif
+#endif
 	}
 
 	unsigned literal_count() { return lt.count(); }

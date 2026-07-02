@@ -244,7 +244,7 @@ struct rvce_enc_operation {
 	uint32_t		input_picture_chroma_address_lo;
 	uint32_t		enc_input_frame_y_pitch;
 	uint32_t		enc_input_pic_luma_pitch;
-	uint32_t		enc_input_pic_chroma_pitch;;
+	uint32_t		enc_input_pic_chroma_pitch;
 	uint32_t		enc_input_pic_addr_array;
 	uint32_t		enc_input_pic_addr_array_disable2pipe_disablemboffload;
 	uint32_t		enc_input_pic_tile_config;
@@ -277,7 +277,7 @@ struct rvce_enc_operation {
 	uint32_t		l1_luma_offset;
 	uint32_t		l1_chroma_offset;
 	uint32_t		enc_reconstructed_luma_offset;
-	uint32_t		enc_reconstructed_chroma_offset;;
+	uint32_t		enc_reconstructed_chroma_offset;
 	uint32_t		enc_coloc_buffer_offset;
 	uint32_t		enc_reconstructed_ref_base_picture_luma_offset;
 	uint32_t		enc_reconstructed_ref_base_picture_chroma_offset;

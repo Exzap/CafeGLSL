@@ -2800,7 +2800,7 @@ void *r600_create_vertex_fetch_shader(struct pipe_context *ctx,
 	assert(false);
 	return NULL;
 	#else
-	
+
 	struct r600_context *rctx = (struct r600_context *)ctx;
 	struct r600_bytecode bc;
 	struct r600_bytecode_vtx vtx;
@@ -2941,7 +2941,7 @@ void *r600_create_vertex_fetch_shader(struct pipe_context *ctx,
 
 	bytecode = r600_buffer_map_sync_with_rings
 		(&rctx->b, shader->buffer,
-		PIPE_MAP_WRITE | PIPE_MAP_UNSYNCHRONIZED | RADEON_MAP_TEMPORARY);
+		(unsigned) PIPE_MAP_WRITE | (unsigned) PIPE_MAP_UNSYNCHRONIZED | (unsigned) RADEON_MAP_TEMPORARY);
 	bytecode += shader->offset / 4;
 
 	if (R600_BIG_ENDIAN) {
@@ -2954,7 +2954,7 @@ void *r600_create_vertex_fetch_shader(struct pipe_context *ctx,
 	rctx->b.ws->buffer_unmap(rctx->b.ws, shader->buffer->buf);
 
 	r600_bytecode_clear(&bc);
-	
+
 	return shader;
 #endif
 }

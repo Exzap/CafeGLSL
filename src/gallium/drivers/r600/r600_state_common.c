@@ -1011,14 +1011,14 @@ static void *r600_create_shader_state(struct pipe_context *ctx,
 {
 	int i;
 	struct r600_pipe_shader_selector *sel;
-	
+
 	if (state->type == PIPE_SHADER_IR_TGSI)
 		sel = r600_create_shader_state_tokens(ctx, state->tokens, state->type, pipe_shader_type);
 	else if (state->type == PIPE_SHADER_IR_NIR) {
 		sel = r600_create_shader_state_tokens(ctx, state->ir.nir, state->type, pipe_shader_type);
 	} else
 		unreachable("Unknown shader type");
-	
+
 	sel->so = state->stream_output;
 
 	switch (pipe_shader_type) {
@@ -2335,7 +2335,7 @@ static void r600_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info 
 	if (rctx->b.gfx_level >= EVERGREEN) {
 		evergreen_emit_atomic_buffer_setup(rctx, false, combined_atomics, atomic_used_mask);
 	}
-		
+
 	if (rctx->b.gfx_level == CAYMAN) {
 		/* Copied from radeonsi. */
 		unsigned primgroup_size = 128; /* recommended without a GS */
@@ -2444,7 +2444,11 @@ static void r600_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info 
 			radeon_emit(cs, PKT3(PKT3_DRAW_INDEX_IMMD, 1 + size_dw, render_cond_bit));
 			radeon_emit(cs, draws[0].count);
 			radeon_emit(cs, V_0287F0_DI_SRC_SEL_IMMEDIATE);
+#ifndef _MSC_VER
 			radeon_emit_array(cs, info->index.user + draws[0].start * index_size, size_dw);
+#else
+			radeon_emit_array(cs, (uint32_t*) ((char*)info->index.user + draws[0].start * index_size), size_dw);
+#endif
 		} else {
 			uint64_t va = r600_resource(indexbuf)->gpu_address + index_offset;
 

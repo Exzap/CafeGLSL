@@ -9,6 +9,14 @@
 
 void DebugLog(const char *format, ...);
 
+#define TEST_ASSERT(condition, message) \
+   (!(condition)) ? \
+      (\
+         DebugLog("Assertion failed: (%s), function: %s, file: %s, line: %d\n", message, __FUNCTION__, __FILE__, __LINE__), \
+         abort(), \
+         0 \
+      ) : 1
+
 GX2PixelShader* TestCompilePS(const char* shaderSource)
 {
     char infoLogBuffer[1024];
@@ -100,12 +108,12 @@ void main()
 }
         )";
     GX2PixelShader* ps = TestCompilePS(psSrc);
-    assert(ps->uniformBlockCount == 2);
-    assert(ps->samplerVarCount == 2);
-    assert(GX2Shader_GetUniformBlockLocation(ps, "uf_data9") == 9);
-    assert(GX2Shader_GetUniformBlockLocation(ps, "uf_data11") == 11);
-    assert(GX2Shader_GetTextureSamplerLocation(ps, "textureSampler") == 2);
-    assert(GX2Shader_GetTextureSamplerLocation(ps, "textureSampler2") == 4);
+    TEST_ASSERT(ps->uniformBlockCount == 2, "Uniform block count was not 2!");
+    TEST_ASSERT(ps->samplerVarCount == 2, "Sample Var count was not 2");
+    TEST_ASSERT(GX2Shader_GetUniformBlockLocation(ps, "uf_data9") == 9, "uf_data9 was not at block 9");
+    TEST_ASSERT(GX2Shader_GetUniformBlockLocation(ps, "uf_data11") == 11, "uf_data11 was not at block 11");
+    TEST_ASSERT(GX2Shader_GetTextureSamplerLocation(ps, "textureSampler") == 2, "textureSampler was not at location 2");
+    TEST_ASSERT(GX2Shader_GetTextureSamplerLocation(ps, "textureSampler2") == 4, "textureSampler2 was not at location 4");
 }
 
 void TestShader2()
@@ -145,7 +153,7 @@ void main()
     //assert(GX2Shader_GetProgramOutputLocation(ps, "Out_Color") == 0);
     //assert(GX2Shader_GetNumProgramInputs(ps) == 2);
     //assert(GX2Shader_GetNumProgramOutputs(ps) == 1);
-    assert(GX2Shader_GetTextureSamplerLocation(ps, "Texture") == 0);
+    TEST_ASSERT(GX2Shader_GetTextureSamplerLocation(ps, "Texture") == 0, "Texture shader location was not at 0");
 
 }
 
@@ -160,9 +168,10 @@ int RunTests()
     DebugLog("Running compiler tests...\n");
 
     TestShader1();
+    DebugLog("Completed test set 1...\n");
     TestShader2();
 
-    DebugLog("Done!");
+    DebugLog("Done!\n");
     GLSL_Shutdown();
     return 0;
 }

@@ -84,7 +84,6 @@ bool vpass::visit(bb_node& n, bool enter) { return true; }
 
 void rev_vpass::run_on(container_node& n) {
 	if (n.accept(*this, true)) {
-
 		for (node_riterator N, I = n.rbegin(), E = n.rend(); I != E; I = N) {
 			N = I;
 			++N;

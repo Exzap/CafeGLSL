@@ -1705,7 +1705,7 @@ if opt_xmlconfig.enabled() and not supports_xmlconfig
 endif
 use_xmlconfig = supports_xmlconfig and not opt_xmlconfig.disabled()
 
-if host_machine.system() == 'darwin'
+if host_machine.system() == 'darwin' and not get_option('prefer_static')
   dep_expat = meson.get_compiler('c').find_library('expat')
 else
   dep_expat = dependency('expat', fallback : ['expat', 'expat_dep'],
@@ -1735,6 +1735,8 @@ endif
 dep_futex = null_dep
 if host_machine.system() == 'windows'
   if (get_option('min-windows-version') < 8)
+    pre_args += '-DWINDOWS_NO_FUTEX'
+  elif get_option('prefer_static')
     pre_args += '-DWINDOWS_NO_FUTEX'
   else
     dep_futex = cc.find_library('synchronization', required : true)
@@ -1997,7 +1999,7 @@ endif
 # Be explicit about only using this lib on Windows, to avoid picking
 # up random libs with the generic name 'libversion'
 dep_version = null_dep
-if host_machine.system() == 'windows'
+if host_machine.system() == 'windows' and not get_option('prefer_static')
   dep_version = cpp.find_library('version')
 endif
 
@@ -2111,7 +2113,7 @@ elif _libunwind == 'false'
   warning('libunwind option "false" deprecated, please use "disabled" instead.')
 endif
 if _libunwind != 'disabled' and not with_platform_android
-  if host_machine.system() == 'darwin'
+  if host_machine.system() == 'darwin' and not get_option('prefer_static')
     dep_unwind = meson.get_compiler('c').find_library('System')
   else
     dep_unwind = dependency('libunwind', required : _libunwind == 'enabled')

@@ -40,6 +40,8 @@ _mesa_glsl_builtin_functions_decref(void);
 
 } /* extern "C" */
 
+#ifndef _CAFE_NO_IR
+
 extern ir_function_signature *
 _mesa_glsl_find_builtin_function(_mesa_glsl_parse_state *state,
                                  const char *name, exec_list *actual_parameters);
@@ -71,7 +73,9 @@ imod64(void *mem_ctx, builtin_available_predicate avail);
 ir_function_signature *
 udivmod64(void *mem_ctx, builtin_available_predicate avail);
 
-}
+}  // namespace generate_ir
+
+#endif /* _CAFE_NO_IR */
 
 #endif /* __cplusplus */
 
