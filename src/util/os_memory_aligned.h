@@ -55,7 +55,18 @@ os_malloc_aligned(size_t size, size_t alignment)
 {
    void *ptr;
    alignment = (alignment + sizeof(void*) - 1) & ~(sizeof(void*) - 1);
+#if defined(__APPLE__)
+   if (size < alignment) {
+      size = alignment;
+   }
+   // Apple requires that we align our size to a power of 2. it will claim ENOMEM, even
+   // when requesting a _smaller_ size that is a valid alignment & size on a normal
+   // posix platform.
+   size_t actual_size = 1 << (32 - __builtin_clz (size - 1));
+   if(posix_memalign(&ptr, alignment, actual_size) != 0)
+#else
    if(posix_memalign(&ptr, alignment, size) != 0)
+#endif
       return NULL;
    return ptr;
 }

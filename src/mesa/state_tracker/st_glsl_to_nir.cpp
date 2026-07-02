@@ -794,7 +794,6 @@ st_link_nir(struct gl_context *ctx,
 
    nir_build_program_resource_list(&ctx->Const, shader_program,
                                    shader_program->data->spirv);
-
    for (unsigned i = 0; i < num_shaders; i++) {
       struct gl_linked_shader *shader = linked_shader[i];
       nir_shader *nir = shader->Program->nir;

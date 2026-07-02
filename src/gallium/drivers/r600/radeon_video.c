@@ -31,7 +31,9 @@
  *
  */
 
+#ifndef _MSC_VER
 #include <unistd.h>
+#endif
 
 #include "util/u_memory.h"
 #include "util/u_video.h"
@@ -98,19 +100,24 @@ bool rvid_resize_buffer(struct pipe_screen *screen, struct radeon_cmdbuf *cs,
 		goto error;
 
 	src = ws->buffer_map(ws, old_buf.res->buf, cs,
-			     PIPE_MAP_READ | RADEON_MAP_TEMPORARY);
+			     (unsigned) PIPE_MAP_READ | (unsigned) RADEON_MAP_TEMPORARY);
 	if (!src)
 		goto error;
 
 	dst = ws->buffer_map(ws, new_buf->res->buf, cs,
-			     PIPE_MAP_WRITE | RADEON_MAP_TEMPORARY);
+			     (unsigned) PIPE_MAP_WRITE | (unsigned) RADEON_MAP_TEMPORARY);
 	if (!dst)
 		goto error;
 
 	memcpy(dst, src, bytes);
 	if (new_size > bytes) {
 		new_size -= bytes;
+		// MSVC can't add to void*
+#ifndef _MSC_VER
 		dst += bytes;
+#else
+		dst = ((char*) dst) + bytes;
+#endif
 		memset(dst, 0, new_size);
 	}
 	ws->buffer_unmap(ws, new_buf->res->buf);

@@ -2,7 +2,6 @@
 #include <fstream>
 #include <cstring>
 #include <string.h>
-#include <bit>
 #include <vector>
 
 template<typename Type>
@@ -42,7 +41,7 @@ constexpr bool align_check(Type value, size_t alignment)
 }
 
 template<typename Type>
-const auto byte_swap(Type value)
+const Type byte_swap(Type value)
 {
     // convert float
     if constexpr (std::is_same_v<Type, float>)
@@ -630,7 +629,7 @@ bool writeFile(const GFDFile &file, const std::string &path, bool align)
         dataHeader.id = blockID++;
         dataHeader.index = i;
 
-    
+
         const uint32_t size = file.vertexShaders[i].size;
         uint8_t* program = (uint8_t*)file.vertexShaders[i].program;
         const std::vector<uint8_t> shaderData(program, program + size);

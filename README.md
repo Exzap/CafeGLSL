@@ -1,6 +1,6 @@
 # CafeGLSL - Shader Compiler for Wii U
 
-This project is an experimental runtime GLSL shader compiler library for the Wii U. It's implemented as a fork of Mesa. The compiler is currently designed for runtime use, meaning you invoke it from your application to compile shaders on the fly. It's not designed to be used as a standalone tool, but support for this may be added in the future.
+This project is an experimental runtime GLSL shader compiler library for the Wii U. It's implemented as a fork of Mesa. The compiler is currently designed for runtime use, meaning you invoke it from your application to compile shaders on the fly. However, a sample standalone binary exists, and can be used to pre-compile `.gsh` shader files.
 
 Why make this?
 By default, Wii U offers no way to compile shaders dynamically during runtime, yet many games, render API translation layers and other dependencies rely on this. This project is intended to fill this void.
@@ -22,17 +22,19 @@ There's two methods of using this compiler.
 
 If you need to compile shaders dynamically at runtime on the Wii U, you need to use the .rpl file.
 
-However, if you can compile all required shaders on your PC (as part of your build process, for example), you should probably use the .elf file.
-It is currently limited to Linux/WSL/Docker only so setting it up may be a bit more involved then the .rpl method.
+However, if you can compile all required shaders on your PC (as part of your build process, for example), you should probably use the pre-built executable file.
+This project has been confirmed to build on Linux, macOS, and Windows. You may be able to build on other platforms, but things may break.
 
-### Statically compile shaders to .gsh on PC (Linux/WSL/Docker only, recommended):
+### Statically compile shaders to .gsh on PC:
 
 #### Compilation:
-1. Follow the [build instructions](#how-to-compile) to compile for your OS or see if the precompiled .elf binaries from the [GitHub Releases](https://github.com/Exzap/CafeGLSL/releases) work on your Linux installation.
-2. Use the `glslcompiler.elf` binary to compile your shaders to .gsh files. The usage is as follows:
+
+1. Follow the [build instructions](#how-to-compile) to compile for your OS or see if the precompiled executable binaries from the [GitHub Releases](https://github.com/Exzap/CafeGLSL/releases) work on your platform.
+2. Use the cafe-glslcompiler executable to compile your shaders to .gsh files. The usage is as follows:
+
 ```bash
 # Example
-glslcompiler -ps ./input/crt.ps -vs ./input/crt.vs -o ./output/crt.gsh
+cafe-glslcompiler -ps ./input/crt.ps -vs ./input/crt.vs -o ./output/crt.gsh
 
 # Usage:
 Usage: shader_compiler [options]
@@ -100,10 +102,14 @@ WHBGfxShaderGroup* GLSL_CompileShader(const char* vsSrc, const char* psSrc)
 
 ## How to compile
 
-#### Requirements for compiling the linux .elf (for the CLI) or Wii U .rpl file (for use as a runtime library):
+#### Requirements for compiling the executable (for the CLI) or Wii U .rpl file (for use as a runtime library):
+
 1. **Meson** - Mesa uses the Meson build system. You can get it from your system package manager.
 2. For Meson and Mesa you need these additional system packages (the names may differ on non-Debian based distros):
     - python3, python3-setuptools, python3-mako, bison, flex
+    - for windows you will need to use winbison3-flex instead of bison & flex.
+      - You can fetch these from chocolatey or another windows package manager: <https://community.chocolatey.org/packages/winflexbison3>
+      - You can also fetch them from the source repository itself: <https://github.com/lexxmark/winflexbison>
 
 #### Additional requirements for compiling a Wii U .rpl file:
 
@@ -120,10 +126,16 @@ Compile glslcompiler.rpl for Wii U using:
 ```
 See the `./build-cafe/cafecompiler/` folder for the output with the .rpl file.
 
-Compile glslcompiler.elf for PC using:
+Compile cafe-glslcompiler for PC using either the bash script (for non windows sytems), or the powershell script (for windows systems):
+
 ```bash
 ./cafecompiler/compile_for_host.sh
 ```
+
+```bash
+./cafecompiler/compile_for_host.ps1
+```
+
 See the `./build-host/cafecompiler/` folder for the output with the .elf file.
 
 ## Troubleshooting and contributing

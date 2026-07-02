@@ -204,10 +204,14 @@ if cpp.has_type('std::pmr::monotonic_buffer_resource',
    r600_cpp_args += '-DHAVE_MEMORY_RESOURCE'
 endif
 
+if host_machine.system() != 'windows'
+  r600_c_args += '-Wstrict-overflow=0'
+endif
+
 libr600 = static_library(
   'r600',
   [files_r600, egd_tables_h],
-  c_args : [r600_c_args, '-Wstrict-overflow=0'],
+  c_args : [r600_c_args],
   cpp_args: r600_cpp_args,
   override_options: ['cpp_std=c++17'],
   gnu_symbol_visibility : 'hidden',
@@ -227,5 +231,3 @@ driver_r600 = declare_dependency(
 if with_tests
   subdir('sfn/tests')
 endif
-
-

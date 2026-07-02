@@ -327,7 +327,7 @@ batch_execute(struct tc_batch *batch, struct pipe_context *pipe, uint64_t *last,
          } else if (call->call_id >= TC_CALL_draw_single &&
                     call->call_id <= TC_CALL_draw_vstate_multi) {
             /* if a draw happens before a set_framebuffer_state on this batch,
-             * begin incrementing renderpass data 
+             * begin incrementing renderpass data
              */
             first = false;
          }
@@ -1871,7 +1871,7 @@ tc_set_shader_images(struct pipe_context *_pipe,
                         count + unbind_num_trailing_slots);
    }
 
-   tc->image_buffers_writeable_mask[shader] &= ~BITFIELD_RANGE(start, count);
+   tc->image_buffers_writeable_mask[shader] &= ~((uint64_t)BITFIELD_RANGE(start, count));
    tc->image_buffers_writeable_mask[shader] |= writable_buffers;
 }
 
@@ -3004,7 +3004,7 @@ tc_buffer_subdata(struct pipe_context *_pipe,
           * until we have removed the merged subdata call, which means that
           * calling tc_invalidate_buffer before we have removed the call will
           * blow things up.
-          * 
+          *
           * Just leave a large, merged subdata call in the batch for now, which is
           * at least better than tons of tiny subdata calls.
           */

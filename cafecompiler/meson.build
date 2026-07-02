@@ -1,4 +1,4 @@
-
+cmake = import('cmake')
 
 dkp_root = '/opt/devkitpro'
 wut_root = dkp_root + '/wut'
@@ -15,11 +15,10 @@ files_cafecompiler_lib = files(
   'tests.cpp',
   'tests.h',
   'api.cpp',
-
 )
 
 libglslcompiler = static_library(
-  'glslcompiler',
+  'cafe-glslcompiler',
   [files_cafecompiler_lib],
   include_directories: [inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common],
   link_with: [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
@@ -34,7 +33,15 @@ files_cafecompiler = files(
 'main.cpp',
 )
 
-cafeglslcompiler = executable('glslcompiler.elf', [files_cafecompiler],
+# Linux/Mac should have empty file suffix for executable binaries.
+# Windows uses 'exe', but meson automatically adds it. So don't mess with it.
+# CafeOS we want to distinguish between elf + rpx, so we use `elf` explicitly.
+compiled_file_suffix = ''
+if host_machine.system() == 'cafeos'
+  compiled_file_suffix = '.elf'
+endif
+
+cafeglslcompiler = executable('cafe-glslcompiler' + compiled_file_suffix, [files_cafecompiler],
   include_directories : [
     inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common,
   ],
@@ -44,6 +51,23 @@ cafeglslcompiler = executable('glslcompiler.elf', [files_cafecompiler],
   gnu_symbol_visibility : 'hidden',
 )
 
+if host_machine.system() != 'cafeos'
+  cmake_file_suffix = ''
+  if host_machine.system() == 'windows'
+    cmake_file_suffix = '.exe'
+  endif
+
+  cmake.configure_package_config_file(
+    name: 'CafeGLSL',
+    input: 'host-CafeGLSL.cmake.in',
+    configuration: {
+      'CMAKE_FILE_SUFFIX': cmake_file_suffix
+    },
+  )
+else
+  # Maybe someday we can write a devkitPro & Sprig compatible cmake package? :)
+endif
+
 if host_machine.system() == 'cafeos'
 custom_target('BuildRPX',
           depends : cafeglslcompiler,
@@ -51,7 +75,7 @@ custom_target('BuildRPX',
           output : 'glslcompiler.rpx',
           command : [path_elf2rpl, '@INPUT@', '@OUTPUT@'],
           build_by_default : true)
-      
+
 # build RPL
 
 # generate imports linker script
@@ -66,7 +90,7 @@ cafeglslcompiler_rpl = executable('glslcompilerrplbase', [files_cafecompiler, rp
   include_directories : [
     inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common,
   ],
-  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
+  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600, libglslcompiler],
   dependencies: [dep_libdrm_radeon, dep_elf, idep_nir, idep_nir_headers, idep_mesautil, driver_r600],
   override_options: ['cpp_std=c++17'],
   link_args: ['-specs=' + wut_root + '/share/rpl.specs'],
@@ -79,14 +103,14 @@ custom_target('BuildRPL',
           output : 'glslcompiler.rpl',
           command : [path_elf2rpl, '@INPUT@', '--rpl', '@OUTPUT@'],
           build_by_default : true)
-    
+
 # build as static library
-cafeglslcompiler_static = static_library('glslcompilerrplstatic', [files_cafecompiler],
+cafeglslcompiler_static = static_library('cafe-glslcompilerrplstatic', [files_cafecompiler],
   include_directories : [
     inc_src, inc_mapi, inc_mesa, inc_include, inc_compiler, inc_gallium, inc_gallium_aux, inc_amd_common,
   ],
   #link_whole : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
-  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600],
+  link_with : [libglsl, libgallium, libmesa, libglapi_static, libgalliumvl, libr600, libglslcompiler],
   dependencies: [dep_libdrm_radeon, dep_elf, idep_nir, idep_nir_headers, idep_mesautil, driver_r600],
   override_options: ['cpp_std=c++17'],
   build_by_default: true,

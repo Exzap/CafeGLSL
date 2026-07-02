@@ -27,7 +27,9 @@
 #include "r600d.h"
 #include "util/u_memory.h"
 #include <errno.h>
+#ifndef _MSC_VER
 #include <unistd.h>
+#endif
 
 
 void r600_need_cs_space(struct r600_context *ctx, unsigned num_dw,

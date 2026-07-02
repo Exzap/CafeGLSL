@@ -44,17 +44,19 @@
  */
 
 
+
+#define _GLAPI_DLL_EXPORTS
+
 #include <stdlib.h>
 #include <string.h>
 #include "glapi/glapi_priv.h"
 
-
-void
+_GLAPI_EXPORT void
 _glapi_noop_enable_warnings(unsigned char enable)
 {
 }
 
-void
+_GLAPI_EXPORT void
 _glapi_set_warning_func(_glapi_proc func)
 {
 }
@@ -70,7 +72,7 @@ static _glapi_nop_handler_proc nop_handler = NULL;
 /**
  * Register the no-op handler call-back function.
  */
-void
+_GLAPI_EXPORT void
 _glapi_set_nop_handler(_glapi_nop_handler_proc func)
 {
    nop_handler = func;

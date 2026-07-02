@@ -1,5 +1,6 @@
 
 #define NO_SFIXED
+#define _CAFE_NO_IR
 
 #define _Static_assert static_assert
 
@@ -13,13 +14,6 @@
 #include "compiler/nir/nir.h"
 
 // C headers
-#define __cplusplusTMP __cplusplus
-#ifdef __APPLE__
-#define _WCHAR_T wchar_t
-#endif
-#undef __cplusplus
-extern "C"
-{
 #include "gallium/drivers/r600/r600_pipe.h"
 #include "gallium/drivers/r600/r600_isa.h"
 #include "gallium/drivers/r600/r600_shader.h"
@@ -31,14 +25,12 @@ extern "C"
 #include "mesa/state_tracker/st_program.h" // for st_variant
 
 #include "compiler/glsl/program.h"
+#include "compiler/glsl/ir.h"
 #include "compiler/glsl/builtin_functions.h" // _mesa_glsl_builtin_functions_init_or_ref
-
 #include "mesa/program/program.h"
 #include "mesa/program/link_program.h"
 #include "mesa/main/shaderobj.h"
 #include "mesa/main/shaderapi.h" // be careful about calling from this as they may have side effects
-}
-#define __cplusplus 201703L
 
 #include "gallium/drivers/r600/sfn/sfn_nir.h"
 
@@ -57,15 +49,15 @@ size_t _strlcpy(char *dst, const char *src, size_t size)
 	char *d = dst;
 	const char *s = src;
 	size_t n = size;
-	if (n != 0) 
+	if (n != 0)
 	{
-		while (--n != 0) 
+		while (--n != 0)
 		{
 			if ((*d++ = *s++) == '\0')
 				break;
 		}
  	}
-	if (n == 0) 
+	if (n == 0)
 	{
 		if (size != 0)
 			*d = '\0';
@@ -84,7 +76,14 @@ int posix_memalign(void **memptr, size_t alignment, size_t size)
 		return EINVAL;
 	}
 
+#ifndef _MSC_VER
 	void *ptr = aligned_alloc(alignment, size);
+	// Alignment _has_ to be a power of 2
+#elif !defined(_M_ARM64)
+	void *ptr = _aligned_malloc(size, 1ULL << (64 - __lzcnt64(alignment)));
+#else
+	void *ptr = _aligned_malloc(size, 1ULL << (64 - _CountLeadingZeros64(alignment)));
+#endif
 	if (ptr == NULL)
 	{
 		return ENOMEM;
@@ -843,16 +842,16 @@ void CafeGLSLCompiler::GetVertexShaderRegs(VSRegs& vsRegs)
 	/* sq_pgm_resources_vs */
 	vsRegs.sq_pgm_resources_vs = S_028868_NUM_GPRS(rshader->bc.ngpr) |
 			       /*S_028868_DX10_CLAMP(1) |*/ // S_028868_DX10_CLAMP is set by Mesa, but not by GX2. Investigate exact purpose
-			       S_028868_STACK_SIZE(rshader->bc.nstack); 
+			       S_028868_STACK_SIZE(rshader->bc.nstack);
 	/* vgt_primitiveid_en */
 	vsRegs.vgt_primitiveid_en = 0; // related to geometry shaders?
 	/* spi_vs_out_config and spi_vs_out_id */
 	for(int i=0; i<10; i++)
 		vsRegs.spi_vs_out_id[i] = 0;
 	uint32_t nparams = 0;
-	for (unsigned int i = 0; i < rshader->noutput; i++) 
+	for (unsigned int i = 0; i < rshader->noutput; i++)
 	{
-		if (rshader->output[i].spi_sid) 
+		if (rshader->output[i].spi_sid)
 		{
 			uint32_t tmp = (0x80 | rshader->output[i].spi_sid) << ((nparams & 3) * 8);
 			vsRegs.spi_vs_out_id[nparams / 4] |= tmp;
@@ -921,7 +920,7 @@ void CafeGLSLCompiler::GetPixelShaderRegs(PSRegs& psRegs)
 	int face_index = -1;
 	int fixed_pt_position_index = -1;
 	uint32_t need_linear = 0;
-	for (unsigned int i = 0; i < rshader->ninput; i++) 
+	for (unsigned int i = 0; i < rshader->ninput; i++)
 	{
 		if (rshader->input[i].name == TGSI_SEMANTIC_POSITION)
 			pos_index = i;
@@ -941,11 +940,11 @@ void CafeGLSLCompiler::GetPixelShaderRegs(PSRegs& psRegs)
 			 S_028850_UNCACHED_FIRST_INST(0);
     /* sq_pgm_exports_ps */
 	uint32_t exports_ps = 0;
-	for (unsigned int i = 0; i < rshader->noutput; i++) 
+	for (unsigned int i = 0; i < rshader->noutput; i++)
 	{
 		if (rshader->output[i].name == TGSI_SEMANTIC_POSITION ||
 		    rshader->output[i].name == TGSI_SEMANTIC_STENCIL ||
-		    rshader->output[i].name == TGSI_SEMANTIC_SAMPLEMASK) 
+		    rshader->output[i].name == TGSI_SEMANTIC_SAMPLEMASK)
 			exports_ps |= 1;
 	}
 	uint32_t num_cout = rshader->nr_ps_color_exports;
@@ -956,8 +955,8 @@ void CafeGLSLCompiler::GetPixelShaderRegs(PSRegs& psRegs)
 	/* spi_ps_in_control_0 */
 	psRegs.spi_ps_in_control_0 = S_0286CC_NUM_INTERP(rshader->ninput) |
 				S_0286CC_PERSP_GRADIENT_ENA(1)|
-				S_0286CC_LINEAR_GRADIENT_ENA(need_linear);	
-	if (pos_index != -1) 
+				S_0286CC_LINEAR_GRADIENT_ENA(need_linear);
+	if (pos_index != -1)
 	{
 		psRegs.spi_ps_in_control_0 |= (S_0286CC_POSITION_ENA(1) |
 					S_0286CC_POSITION_CENTROID(rshader->input[pos_index].interpolate_location == TGSI_INTERPOLATE_LOC_CENTROID) |
@@ -967,19 +966,19 @@ void CafeGLSLCompiler::GetPixelShaderRegs(PSRegs& psRegs)
 	}
 	/* spi_ps_in_control_1 */
 	psRegs.spi_ps_in_control_1 = 0;
-	if (face_index != -1) 
+	if (face_index != -1)
 	{
 		psRegs.spi_ps_in_control_1 |= S_0286D0_FRONT_FACE_ENA(1) |
 			S_0286D0_FRONT_FACE_ADDR(rshader->input[face_index].gpr);
 	}
-	if (fixed_pt_position_index != -1) 
+	if (fixed_pt_position_index != -1)
 	{
 		psRegs.spi_ps_in_control_1 |= S_0286D0_FIXED_PT_POSITION_ENA(1) |
 			S_0286D0_FIXED_PT_POSITION_ADDR(rshader->input[fixed_pt_position_index].gpr);
 	}
     /* num_spi_ps_input_cntl and spi_ps_input_cntls */
 	uint32_t sprite_coord_enable = 0; // todo
-	for (unsigned int i = 0; i < 32; i++) 
+	for (unsigned int i = 0; i < 32; i++)
 		psRegs.spi_ps_input_cntls[i] = 0;
 	for (unsigned int i = 0; i < rshader->ninput; i++)
 	{
@@ -1002,7 +1001,7 @@ void CafeGLSLCompiler::GetPixelShaderRegs(PSRegs& psRegs)
 			input_cntl |= S_028644_SEL_CENTROID(1);
 		if (rshader->input[i].interpolate_location == TGSI_INTERPOLATE_LOC_SAMPLE)
 			input_cntl |= S_028644_SEL_SAMPLE(1);
-		if (rshader->input[i].interpolate == TGSI_INTERPOLATE_LINEAR) 
+		if (rshader->input[i].interpolate == TGSI_INTERPOLATE_LINEAR)
 		{
 			need_linear = 1;
 			input_cntl |= S_028644_SEL_LINEAR(1);
@@ -1014,14 +1013,14 @@ void CafeGLSLCompiler::GetPixelShaderRegs(PSRegs& psRegs)
 	psRegs.cb_shader_mask = rshader->ps_color_export_mask; // unsure
     /* cb_shader_control */
 	uint32_t multiwrite = rshader->nr_ps_color_exports > 1 ? 1 : 0;
-	psRegs.cb_shader_control = S_028808_MULTIWRITE_ENABLE(multiwrite); 
+	psRegs.cb_shader_control = S_028808_MULTIWRITE_ENABLE(multiwrite);
 	psRegs.cb_shader_control |= 1; // GX2 seems to set this. In Mesa this is documented as S_028808_FOG_ENABLE
 	// more fields todo ?
     /* db_shader_control */
 	psRegs.db_shader_control = 0;
 	int msaa = 0; // todo
 	uint32_t z_export = 0, stencil_export = 0, mask_export = 0;
-	for (unsigned int i = 0; i < rshader->noutput; i++) 
+	for (unsigned int i = 0; i < rshader->noutput; i++)
 	{
 		if (rshader->output[i].name == TGSI_SEMANTIC_POSITION)
 			z_export = 1;
@@ -1038,7 +1037,7 @@ void CafeGLSLCompiler::GetPixelShaderRegs(PSRegs& psRegs)
 		psRegs.db_shader_control |= S_02880C_KILL_ENABLE(1);
     /* spi_input_z */
 	psRegs.spi_input_z = 0;
-	if (pos_index != -1) 
+	if (pos_index != -1)
 		psRegs.spi_input_z |= S_0286D8_PROVIDE_Z_TO_SPI(1);
 }
 
@@ -1401,7 +1400,7 @@ void CafeGLSLCompiler::GetShaderIOInfo(CafeShaderIOInfo& shaderIOInfo)
             if(!_mesa_program_get_resource_name(res, &rname))
                 continue;
 
-            
+
             if(res->Type == GL_PROGRAM_INPUT)
 			{
 				/*trackProgramInputEx(shaderIOInfo, rname.string, var->location);*/

@@ -286,7 +286,7 @@ static void rvce_begin_frame(struct pipe_video_codec *encoder,
 	else if (pic->picture_type == PIPE_H2645_ENC_PICTURE_TYPE_P ||
 	         pic->picture_type == PIPE_H2645_ENC_PICTURE_TYPE_B)
 		sort_cpb(enc);
-	
+
 	if (!enc->stream_handle) {
 		struct rvid_buffer fb;
 		enc->stream_handle = rvid_alloc_stream_handle();
@@ -360,7 +360,7 @@ static void rvce_get_feedback(struct pipe_video_codec *encoder,
 	if (size) {
 		uint32_t *ptr = enc->ws->buffer_map(enc->ws,
 			fb->res->buf, &enc->cs,
-			PIPE_MAP_READ_WRITE | RADEON_MAP_TEMPORARY);
+			(unsigned) PIPE_MAP_READ_WRITE | (unsigned) RADEON_MAP_TEMPORARY);
 
 		if (ptr[1]) {
 			*size = ptr[4] - ptr[9];
