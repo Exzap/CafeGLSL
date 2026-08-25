@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release, e.g. v0.3.0. Created at the current commit if it does not exist.'
+        required: true
+        type: string
+      draft:
+        description: 'Publish as a draft instead of a live release'
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as a pre-release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Resolve the tag and version
+        # Through the environment, so a tag name is never spliced into the shell.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$REF_NAME"
+          fi
+
+          case "$TAG" in
+            v*) ;;
+            *) echo "expected a tag starting with v, got '$TAG'" >&2; exit 1 ;;
+          esac
+
+          VERSION="${TAG#v}"
+          DECLARED="$(./cafecompiler/ci/version.sh)"
+          if [ "$VERSION" != "$DECLARED" ]; then
+            echo "::warning::tag $TAG does not match cafeglsl_version $DECLARED in cafecompiler/meson.build"
+          fi
+
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build the archives
+        run: ./cafecompiler/ci/archive.sh artifacts dist "$VERSION"
+
+      - name: Write the release notes
+        run: |
+          cat > notes.md <<NOTES
+          A GLSL to GX2 shader compiler for the Wii U (Latte) GPU, built from Mesa.
+
+          | Download | What it is |
+          | --- | --- |
+          | \`cafeglsl-$VERSION-wiiu-ppc.tar.xz\` | The library, cross-compiled for CafeOS. Unpack it over \`/opt/devkitpro/portlibs/wiiu\` and pick it up with CMake or pkg-config. |
+          | \`cafeglsl-$VERSION-linux-x86_64.tar.xz\` | Standalone compiler for Linux. |
+          | \`cafeglsl-$VERSION-windows-x86_64.zip\` | Standalone compiler for Windows. |
+          | \`cafeglsl-$VERSION-macos-arm64.tar.xz\` | Standalone compiler for Apple Silicon Macs. |
+          | \`cafeglsl-$VERSION-macos-x86_64.tar.xz\` | Standalone compiler for Intel Macs. |
+
+          The standalone archives also carry the compiler as a static library and
+          its headers, for host tools that link it directly. Every archive has a
+          README covering its own layout. Checksums are in \`SHA256SUMS\`.
+          NOTES
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ inputs.draft && '--draft' || '' }}
+          PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
+        run: |
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "CafeGLSL $VERSION" \
+            --notes-file notes.md \
+            --generate-notes \
+            $DRAFT $PRERELEASE \
+            dist/*

@@ -1,6 +1,7 @@
 cafecompiler_sources = files(
   'api.cpp',
   'cafe_compiler.cpp',
+  'gfd_write.cpp',
 )
 
 libcafeglsl = static_library(
@@ -23,7 +24,7 @@ libcafeglsl = static_library(
   install : true,
 )
 
-install_headers('CafeGLSLCompiler.h', 'cafe_gx2.h', subdir : 'cafeglsl')
+install_headers('CafeGLSLCompiler.h', 'cafe_gx2.h', 'gfd.h', subdir : 'cafeglsl')
 
 # Version of the CafeGLSL API, as reported by GetGLSLCompilerVersion(). Separate from
 # Mesa's own VERSION file.
@@ -79,7 +80,7 @@ if host_machine.system() != 'cafeos'
 
   cafeglsl_cli = executable(
     'glslcompiler.elf',
-    ['main.cpp', 'gfd_write.cpp'],
+    ['main.cpp'],
     include_directories : include_directories('.'),
     link_with : libcafeglsl,
     dependencies : [idep_mesautil],

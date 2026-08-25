@@ -1,0 +1,213 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  MESON_ARGS: >-
+    -Dgallium-drivers=r600
+    -Dvulkan-drivers=
+    -Dglx=disabled
+    -Degl=disabled
+    -Dplatforms=
+    -Dllvm=disabled
+    -Db_sanitize=none
+    -Db_lundef=false
+    --buildtype=release
+
+  # A bare `meson test` would pull in Mesa's own tests, which this build lacks.
+  MESON_TESTS: cafeglsl-smoke cafeglsl-skinning-regression
+
+jobs:
+  linux:
+    name: Linux (x86_64)
+    runs-on: ubuntu-latest
+    # Containerised to pin the glibc the binary needs, not to pin the toolchain.
+    container: ubuntu:22.04
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates git pkg-config ninja-build \
+            python3-pip python3-setuptools python3-mako python3-yaml \
+            python3-packaging bison flex \
+            zlib1g-dev libexpat1-dev
+          # 22.04 ships meson 0.61; the retry covers pip refusing PEP 668 installs.
+          pip3 install --no-cache-dir 'meson>=1.4' \
+            || pip3 install --no-cache-dir --break-system-packages 'meson>=1.4'
+
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        env:
+          LDFLAGS: -static-libgcc -static-libstdc++
+        run: meson setup build -Dtools=glsl ${{ env.MESON_ARGS }}
+
+      - name: Build
+        run: ninja -C build cafecompiler/glslcompiler.elf cafecompiler/libcafeglsl.a
+
+      - name: Test
+        run: meson test -C build --print-errorlogs ${{ env.MESON_TESTS }}
+
+      - name: Package
+        run: ./cafecompiler/ci/package.sh host build stage
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cafeglsl-linux-x86_64
+          path: stage/
+          if-no-files-found: error
+
+  windows:
+    name: Windows (x86_64)
+    runs-on: ubuntu-latest
+    # 24.04 for a recent mingw; the container's glibc is irrelevant to a .exe.
+    container: ubuntu:24.04
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates git pkg-config ninja-build \
+            python3-pip python3-setuptools python3-mako python3-yaml \
+            python3-packaging bison flex \
+            g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+          pip3 install --no-cache-dir 'meson>=1.4' \
+            || pip3 install --no-cache-dir --break-system-packages 'meson>=1.4'
+
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        # No mingw zlib/expat to find, so meson builds both from subprojects/.
+        run: |
+          meson setup build --cross-file cafecompiler/ci/mingw64.cross \
+            -Dtools=glsl ${{ env.MESON_ARGS }}
+
+      - name: Build
+        run: ninja -C build cafecompiler/glslcompiler.elf.exe cafecompiler/libcafeglsl.a
+
+      - name: Check the exe is self-contained
+        # Stands in for a test run, which a Linux runner cannot do for a .exe.
+        run: |
+          IMPORTS="$(x86_64-w64-mingw32-objdump -p build/cafecompiler/glslcompiler.elf.exe \
+            | sed -n 's/^\tDLL Name: //p')"
+          echo "$IMPORTS"
+          if echo "$IMPORTS" | grep -qi '^lib'; then
+            echo "::error::the .exe imports a runtime DLL, so -static did not take effect"
+            exit 1
+          fi
+
+      - name: Package
+        run: ./cafecompiler/ci/package.sh host build stage
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cafeglsl-windows-x86_64
+          path: stage/
+          if-no-files-found: error
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          # The last Intel image Actions offers; it retires in August 2027.
+          - runner: macos-15-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        # Apple's bison is 2.3, too old for the GLSL parser.
+        run: brew install bison flex ninja pkgconf
+
+      - name: Install meson and mako
+        # One venv: meson needs mako, yaml and packaging in the same interpreter.
+        run: |
+          python3 -m venv "$HOME/venv"
+          "$HOME/venv/bin/pip" install --no-cache-dir --upgrade pip 'meson>=1.4' mako pyyaml packaging
+          echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+
+      - name: Configure
+        run: meson setup build -Dtools=glsl ${{ env.MESON_ARGS }}
+
+      - name: Build
+        run: ninja -C build cafecompiler/glslcompiler.elf cafecompiler/libcafeglsl.a
+
+      - name: Test
+        run: meson test -C build --print-errorlogs ${{ env.MESON_TESTS }}
+
+      - name: Package
+        run: ./cafecompiler/ci/package.sh host build stage
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cafeglsl-macos-${{ matrix.arch }}
+          path: stage/
+          if-no-files-found: error
+
+  wiiu:
+    name: Wii U library (PowerPC)
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitppc:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITPPC: /opt/devkitpro/devkitPPC
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates git pkg-config ninja-build \
+            python3-pip python3-setuptools python3-mako python3-yaml \
+            python3-packaging bison flex
+          pip3 install --no-cache-dir 'meson>=1.4' \
+            || pip3 install --no-cache-dir --break-system-packages 'meson>=1.4'
+
+      - uses: actions/checkout@v7
+
+      - name: Put the toolchain on PATH
+        # meson-toolchain.sh emits bare tool names, so ninja needs them resolvable.
+        run: |
+          echo "$DEVKITPPC/bin" >> "$GITHUB_PATH"
+          echo "$DEVKITPRO/portlibs/wiiu/bin" >> "$GITHUB_PATH"
+          echo "$DEVKITPRO/portlibs/ppc/bin" >> "$GITHUB_PATH"
+
+      - name: Configure
+        # -Dtools= drops the uncross-buildable host tools; libglsl_standalone stays.
+        run: |
+          ./cafecompiler/meson-cross.sh wiiu ppccross-ci build-cafe \
+            -Dtools= \
+            ${{ env.MESON_ARGS }} \
+            -Db_staticpic=false \
+            -Db_lto=false
+
+      - name: Build
+        run: ninja -C build-cafe cafecompiler/libcafeglsl.a
+
+      - name: Package
+        run: ./cafecompiler/ci/package.sh wiiu build-cafe stage
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cafeglsl-wiiu-ppc
+          path: stage/
+          if-no-files-found: error
