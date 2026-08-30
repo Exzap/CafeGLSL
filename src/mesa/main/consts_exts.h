@@ -533,6 +533,13 @@ struct gl_constants
    GLuint ForceGLSLVersion;
 
    /**
+    * If non-zero, a GLSL shader that declares no #version at all behaves as if
+    * it began with "#version DefaultGLSLVersion". Unlike ForceGLSLVersion this
+    * never overrides a version the shader does declare.
+    */
+   GLuint DefaultGLSLVersion;
+
+   /**
     * Allow GLSL #extension directives in the middle of shaders.
     */
    GLboolean AllowGLSLExtensionDirectiveMidShader;

@@ -2578,6 +2578,13 @@ glcpp_parser_resolve_implicit_version(glcpp_parser_t *parser)
    int language_version = parser->api == API_OPENGLES2 ?
                           IMPLICIT_GLSL_ES_VERSION : IMPLICIT_GLSL_VERSION;
 
+   /* Keep the preprocessor's idea of the implicit version in step with the
+    * compiler's, or __VERSION__ and the GL_ARB_* macros this gates would describe
+    * a different language than the one the shader is about to be parsed as.
+    */
+   if (parser->api != API_OPENGLES2 && parser->gl_ctx->Const.DefaultGLSLVersion)
+      language_version = parser->gl_ctx->Const.DefaultGLSLVersion;
+
    _glcpp_parser_handle_version_declaration(parser, language_version,
                                             NULL, false);
 }

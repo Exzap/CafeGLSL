@@ -83,7 +83,8 @@ _mesa_glsl_parse_state::_mesa_glsl_parse_state(struct gl_context *_ctx,
    this->uses_builtin_functions = false;
 
    /* Set default language version and extensions */
-   this->language_version = 110;
+   this->language_version =
+      ctx->Const.DefaultGLSLVersion ? ctx->Const.DefaultGLSLVersion : 110;
    this->forced_language_version = ctx->Const.ForceGLSLVersion;
    if (ctx->Const.GLSLZeroInit == 1) {
       this->zero_init = (1u << ir_var_auto) | (1u << ir_var_temporary) | (1u << ir_var_shader_out);
@@ -93,6 +94,11 @@ _mesa_glsl_parse_state::_mesa_glsl_parse_state(struct gl_context *_ctx,
       this->zero_init = 0;
    }
    this->gl_version = 20;
+   /* Deliberately not recomputed from DefaultGLSLVersion the way
+    * process_version_directive() does it for a declared #version: a shader that
+    * names no version has not asked for core semantics, so it keeps the compat
+    * builtins it can use today.
+    */
    this->compat_shader = true;
    this->es_shader = false;
    this->ARB_texture_rectangle_enable = true;

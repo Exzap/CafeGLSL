@@ -934,6 +934,14 @@ bool CafeCompiler::InitializeContext()
    m_ctx->Const.GLSLVersion = 450;
    m_ctx->Const.GLSLVersionCompat = 450;
    m_ctx->Const.AllowGLSLCompatShaders = true;
+   /* agl builds GX2 shader source by stripping any #version and prepending
+    * "#version 330" (aglShaderCompileInfo.cpp), so SDK-era shaders were written
+    * expecting that and many omit the directive entirely - NSMBU has some that use
+    * std140 blocks with no #version at all, which Mesa's 1.10 default has no such
+    * thing as. Match what the hardware's front end saw. Unlike ForceGLSLVersion this
+    * only fills in a version the shader did not state.
+    */
+   m_ctx->Const.DefaultGLSLVersion = 330;
    m_ctx->Const.NativeIntegers = true;
    m_ctx->Const.UniformBooleanTrue = ~0u;
    m_ctx->Const.GenerateTemporaryNames = true;

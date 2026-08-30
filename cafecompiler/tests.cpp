@@ -951,6 +951,85 @@ void main()
    CHECK(rio_view_proj && rio_view_proj->offset == 16);
    CHECK(rio_view_proj->count == 4 && rio_view_proj->block == 0);
 
+   /* agl prepends "#version 330" to GX2 shader source, so SDK-era shaders often omit
+    * the directive - some of NSMBU's declare std140 blocks with no #version at all,
+    * which GLSL 1.10 has no such thing as. Keep the binding explicit here so this test
+    * covers the language default independently of implicit UBO binding assignment.
+    */
+   GX2VertexShader *implicit_version_vs = CompileVertexShader(
+      "#extension GL_ARB_shading_language_420pack : require\n"
+      "layout(std140, binding = 0) uniform Shp { vec4 shape; };\n"
+      "in vec4 aPosition;\n"
+      "void main() { gl_Position = aPosition + shape; }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!implicit_version_vs) {
+      fprintf(stderr, "Shader without a #version failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(FindUniformBlock(implicit_version_vs->uniformBlocks,
+                          implicit_version_vs->uniformBlockCount, "Shp") == 0);
+
+   /* The preprocessor keeps its own implicit version, so it has to move too - otherwise
+    * __VERSION__ and the GL_ARB_* macros it gates describe a different language than the
+    * one the shader is then parsed as.
+    */
+   GX2VertexShader *implicit_version_pp_vs = CompileVertexShader(
+      "#if __VERSION__ != 330\n"
+      "#error implicit version did not reach the preprocessor\n"
+      "#endif\n"
+      "void main() { gl_Position = vec4(0.0); }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!implicit_version_pp_vs) {
+      fprintf(stderr, "__VERSION__ without a #version failed: %s\n", diagnostics);
+      return 1;
+   }
+
+   /* A default, not a force: a shader that names its version still gets it, with all the
+    * restrictions that come with it. This is what separates DefaultGLSLVersion from
+    * ForceGLSLVersion, so it stays here to catch anyone folding the two together.
+    */
+   GX2VertexShader *declared_version_vs = CompileVertexShader(
+      "#version 110\n"
+      "#if __VERSION__ != 110\n"
+      "#error declared version was overridden\n"
+      "#endif\n"
+      "void main() { gl_Position = vec4(0.0); }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!declared_version_vs) {
+      fprintf(stderr, "Declared #version 110 failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(!CompileVertexShader(
+      "#version 110\n"
+      "layout(std140) uniform Shp { vec4 shape; };\n"
+      "void main() { gl_Position = shape; }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE));
+
+   /* A version-less shader has not asked for core semantics, so attribute/varying stay
+    * legal - the SDK-era sources that omit #version are exactly the old-style ones.
+    * (Fixed-function attributes like gl_Color are a separate matter: Latte's semantic
+    * map only covers the generic slots, so those still get rejected.)
+    */
+   GX2VertexShader *implicit_version_compat_vs = CompileVertexShader(
+      "attribute vec4 aPosition;\n"
+      "varying vec4 vColor;\n"
+      "void main() { gl_Position = aPosition; vColor = aPosition.yxzw; }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!implicit_version_compat_vs) {
+      fprintf(stderr, "Version-less compat shader failed: %s\n", diagnostics);
+      return 1;
+   }
+
    GX2PixelShader *invalid = CompilePixelShader(
       "#version 450\nthis is invalid;",
       diagnostics,
@@ -963,6 +1042,10 @@ void main()
    FreeVertexShader(rio_mvp_vs);
    FreeVertexShader(rio_named_varying_vs);
    FreeVertexShader(rio_bound_block_vs);
+   FreeVertexShader(implicit_version_vs);
+   FreeVertexShader(implicit_version_pp_vs);
+   FreeVertexShader(declared_version_vs);
+   FreeVertexShader(implicit_version_compat_vs);
    FreePixelShader(rio_primitive_ps);
    FreePixelShader(rio_mix_ps);
    FreePixelShader(rio_light_ps);
