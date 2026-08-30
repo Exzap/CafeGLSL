@@ -73,6 +73,10 @@ jobs:
   windows:
     name: Windows (x86_64)
     runs-on: ubuntu-latest
+    env:
+      WINEARCH: win64
+      WINEDEBUG: -all
+      WINEPREFIX: /tmp/cafeglsl-wine
     # 24.04 for a recent mingw; the container's glibc is irrelevant to a .exe.
     container: ubuntu:24.04
     steps:
@@ -83,7 +87,8 @@ jobs:
             build-essential ca-certificates git pkg-config ninja-build \
             python3-pip python3-setuptools python3-mako python3-yaml \
             python3-packaging bison flex \
-            g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+            g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 \
+            wine64
           pip3 install --no-cache-dir 'meson>=1.4' \
             || pip3 install --no-cache-dir --break-system-packages 'meson>=1.4'
 
@@ -93,6 +98,7 @@ jobs:
         # No mingw zlib/expat to find, so meson builds both from subprojects/.
         run: |
           meson setup build --cross-file cafecompiler/ci/mingw64.cross \
+            --cross-file cafecompiler/ci/wine64.cross \
             -Dtools=glsl ${{ env.MESON_ARGS }}
 
       - name: Build
@@ -108,6 +114,9 @@ jobs:
             echo "::error::the .exe imports a runtime DLL, so -static did not take effect"
             exit 1
           fi
+
+      - name: Test
+        run: meson test -C build --print-errorlogs ${{ env.MESON_TESTS }}
 
       - name: Package
         run: ./cafecompiler/ci/package.sh host build stage

@@ -1033,9 +1033,10 @@ void main()
    /* NSMBU shaders indicate that the official SDK accepts failed token pastes as adjacency. */
    static const char paste_source[] =
       "#version 150\n"
+      "#extension GL_ARB_shading_language_420pack : require\n"
       "#define expand_tex_coord( n ) tex_coord##n##.x\n"
       "#define expand_amb( n ) cAmbColor[##n]\n"
-      "layout(std140) uniform Amb { vec4 cAmbColor[4]; };\n"
+      "layout(std140, binding = 0) uniform Amb { vec4 cAmbColor[4]; };\n"
       "in vec4 tex_coord0;\n"
       "void main() {\n"
       "   gl_Position = vec4(expand_tex_coord( 0 )) + expand_amb( 2 );\n"
