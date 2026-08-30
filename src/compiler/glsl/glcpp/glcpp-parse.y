@@ -1330,6 +1330,8 @@ _token_print(struct _mesa_string_buffer *out, token_t *token)
  * function may return 'token' or 'other' directly rather than allocating
  * anything new.
  *
+ * Returns NULL for an invalid paste, which the Cafe SDK treats as adjacency.
+ *
  * Caution: Only very cursory error-checking is performed to see if
  * the final result is a valid single token. */
 static token_t *
@@ -1440,14 +1442,7 @@ _token_paste(glcpp_parser_t *parser, token_t *token, token_t *other)
    }
 
     FAIL:
-   glcpp_error (&token->location, parser, "");
-   _mesa_string_buffer_append(parser->info_log, "Pasting \"");
-   _token_print(parser->info_log, token);
-   _mesa_string_buffer_append(parser->info_log, "\" and \"");
-   _token_print(parser->info_log, other);
-   _mesa_string_buffer_append(parser->info_log, "\" does not give a valid preprocessing token.\n");
-
-   return token;
+   return NULL;
 }
 
 /*
@@ -1853,7 +1848,16 @@ _glcpp_parser_apply_pastes(glcpp_parser_t *parser, token_list_t *list)
          return;
       }
 
-      node->token = _token_paste(parser, node->token, next_non_space->token);
+      token_t *combined =
+         _token_paste(parser, node->token, next_non_space->token);
+
+      if (combined == NULL) {
+         node->next = next_non_space;
+         node = next_non_space;
+         continue;
+      }
+
+      node->token = combined;
       node->next = next_non_space->next;
       if (next_non_space == list->tail)
          list->tail = node;

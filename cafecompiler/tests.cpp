@@ -1030,6 +1030,51 @@ void main()
       return 1;
    }
 
+   /* NSMBU shaders indicate that the official SDK accepts failed token pastes as adjacency. */
+   static const char paste_source[] =
+      "#version 150\n"
+      "#define expand_tex_coord( n ) tex_coord##n##.x\n"
+      "#define expand_amb( n ) cAmbColor[##n]\n"
+      "layout(std140) uniform Amb { vec4 cAmbColor[4]; };\n"
+      "in vec4 tex_coord0;\n"
+      "void main() {\n"
+      "   gl_Position = vec4(expand_tex_coord( 0 )) + expand_amb( 2 );\n"
+      "}\n";
+
+   GX2VertexShader *adjacent_paste_vs = CompileVertexShader(
+      paste_source,
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!adjacent_paste_vs) {
+      fprintf(stderr, "Adjacent token pasting failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(FindAttribute(adjacent_paste_vs->attribVars,
+                       adjacent_paste_vs->attribVarCount, "tex_coord0") >= 0);
+
+   GX2VertexShader *valid_paste_vs = CompileVertexShader(
+      "#version 150\n"
+      "#define GLUE( a, b ) a##b\n"
+      "#define VARIANT 1\n"
+      "in vec4 attr_one;\n"
+      "in vec4 attr_two;\n"
+      "#if VARIANT\n"
+      "#define PICK GLUE( attr_, one )\n"
+      "#else\n"
+      "#define PICK GLUE( attr_, two )\n"
+      "#endif\n"
+      "void main() { gl_Position = PICK; }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!valid_paste_vs) {
+      fprintf(stderr, "Identifier token pasting failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(FindAttribute(valid_paste_vs->attribVars,
+                       valid_paste_vs->attribVarCount, "attr_one") >= 0);
+
    GX2PixelShader *invalid = CompilePixelShader(
       "#version 450\nthis is invalid;",
       diagnostics,
@@ -1046,6 +1091,8 @@ void main()
    FreeVertexShader(implicit_version_pp_vs);
    FreeVertexShader(declared_version_vs);
    FreeVertexShader(implicit_version_compat_vs);
+   FreeVertexShader(adjacent_paste_vs);
+   FreeVertexShader(valid_paste_vs);
    FreePixelShader(rio_primitive_ps);
    FreePixelShader(rio_mix_ps);
    FreePixelShader(rio_light_ps);
