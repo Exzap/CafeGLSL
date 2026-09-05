@@ -53,6 +53,28 @@ static int FindAttribute(const GX2AttribVar *attributes, uint32_t count, const c
    return -1;
 }
 
+static const GX2AttribVar *FindAttribVar(const GX2AttribVar *attributes,
+                                         uint32_t count,
+                                         const char *name)
+{
+   for (uint32_t i = 0; i < count; ++i) {
+      if (!strcmp(attributes[i].name, name))
+         return &attributes[i];
+   }
+   return nullptr;
+}
+
+static const GX2SamplerVar *FindSamplerVar(const GX2SamplerVar *samplers,
+                                           uint32_t count,
+                                           const char *name)
+{
+   for (uint32_t i = 0; i < count; ++i) {
+      if (!strcmp(samplers[i].name, name))
+         return &samplers[i];
+   }
+   return nullptr;
+}
+
 static const GX2UniformVar *FindUniform(const GX2UniformVar *uniforms,
                                        uint32_t count,
                                        const char *name)
@@ -239,6 +261,48 @@ static bool HasKcacheBank(const void *program, uint32_t size, uint32_t bank)
    return false;
 }
 
+/* NSMBU's Mat block, from the .sharcfb layout of actor/cobStart.szs "mtStart".
+ *
+ * Not covered, for want of a retail example: blockless uniforms (so bank 0 going
+ * to the loose uniforms is unverified), member types beyond
+ * FLOAT4/FLOAT3/FLOAT/INT, any second block layout, geometry shaders, and
+ * uniform-register mode.
+ */
+#define NSMBU_MAT_BLOCK                                                         \
+   "layout(std140) uniform Mat {\n"                                             \
+   "   vec4 mat_color0;\n"                                                      \
+   "   vec4 mat_color1;\n"                                                      \
+   "   vec4 amb_color0;\n"                                                      \
+   "   vec4 amb_color1;\n"                                                      \
+   "   vec4 tev_color0;\n"                                                      \
+   "   vec4 tev_color1;\n"                                                      \
+   "   vec4 tev_color2;\n"                                                      \
+   "   vec4 konst0;\n"                                                          \
+   "   vec4 konst1;\n"                                                          \
+   "   vec4 konst2;\n"                                                          \
+   "   vec4 konst3;\n"                                                          \
+   "   vec4 ind_texmtx0[2];\n"                                                  \
+   "   vec4 ind_texmtx1[2];\n"                                                  \
+   "   vec4 ind_texmtx2[2];\n"                                                  \
+   "   vec4 texmtx0[3];\n"                                                      \
+   "   vec4 texmtx1[3];\n"                                                      \
+   "   vec4 texmtx2[3];\n"                                                      \
+   "   vec4 texmtx3[3];\n"                                                      \
+   "   vec4 texmtx4[3];\n"                                                      \
+   "   vec4 texmtx5[3];\n"                                                      \
+   "   vec4 texmtx6[3];\n"                                                      \
+   "   vec4 texmtx7[3];\n"                                                      \
+   "};\n"
+
+/* Referencing every member keeps them all in the symbol table. */
+#define NSMBU_MAT_SUM                                                           \
+   "(mat_color0 + mat_color1 + amb_color0 + amb_color1 +\n"                     \
+   " tev_color0 + tev_color1 + tev_color2 +\n"                                  \
+   " konst0 + konst1 + konst2 + konst3 +\n"                                     \
+   " ind_texmtx0[0] + ind_texmtx1[1] + ind_texmtx2[0] +\n"                      \
+   " texmtx0[0] + texmtx1[1] + texmtx2[2] + texmtx3[0] +\n"                     \
+   " texmtx4[1] + texmtx5[2] + texmtx6[0] + texmtx7[2])"
+
 int main()
 {
    static const char vertex_source[] = R"(
@@ -324,7 +388,7 @@ void main() {
                           "VertexData") == 4);
    const GX2UniformVar *scale = FindUniform(
       vertex->uniformVars, vertex->uniformVarCount, "scale");
-   CHECK(scale && scale->offset == 16);
+   CHECK(scale && scale->offset == 4);
 
    GX2PixelShader *pixel = CompilePixelShader(
       pixel_source, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE);
@@ -363,9 +427,9 @@ void main() {
       pixel->uniformVars, pixel->uniformVarCount, "looseData.factor");
    const int pixel_loose_block = FindUniformBlockIndex(
       pixel->uniformBlocks, pixel->uniformBlockCount, "__cafe_loose_uniforms");
-   CHECK(tint && tint->offset == 16);
+   CHECK(tint && tint->offset == 4);
    CHECK(tint->block == 0);
-   CHECK(exposure && exposure->offset == 16);
+   CHECK(exposure && exposure->offset == 4);
    CHECK(exposure->block == pixel_loose_block);
    CHECK(loose_color && loose_factor);
    CHECK(loose_factor->offset > loose_color->offset);
@@ -711,9 +775,9 @@ void main()
       rio_primitive_vs->uniformVars, rio_primitive_vs->uniformVarCount, "color1");
    CHECK(rio_wvp && rio_wvp->count == 4 && rio_wvp->offset == 0);
    CHECK(rio_wvp->type == GX2_SHADER_VAR_TYPE_FLOAT4 && rio_wvp->block == -1);
-   CHECK(rio_user && rio_user->count == 3 && rio_user->offset == 64);
-   CHECK(rio_color0 && rio_color0->count == 1 && rio_color0->offset == 112);
-   CHECK(rio_color1 && rio_color1->count == 1 && rio_color1->offset == 128);
+   CHECK(rio_user && rio_user->count == 3 && rio_user->offset == 16);
+   CHECK(rio_color0 && rio_color0->count == 1 && rio_color0->offset == 28);
+   CHECK(rio_color1 && rio_color1->count == 1 && rio_color1->offset == 32);
 
    GX2PixelShader *rio_primitive_ps = CompilePixelShader(
       rio_primitive_pixel, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE);
@@ -846,8 +910,8 @@ void main()
       rio_light_ps->uniformVars, rio_light_ps->uniformVarCount, "viewPos");
    CHECK(rio_light_color && rio_light_color->offset == 0);
    CHECK(rio_light_color->type == GX2_SHADER_VAR_TYPE_FLOAT3);
-   CHECK(rio_light_pos && rio_light_pos->offset == 16);
-   CHECK(rio_view_pos && rio_view_pos->offset == 32);
+   CHECK(rio_light_pos && rio_light_pos->offset == 4);
+   CHECK(rio_view_pos && rio_view_pos->offset == 8);
    CHECK(FindSampler(rio_light_ps->samplerVars,
                      rio_light_ps->samplerVarCount, "texture0") == 0);
    CHECK(FindSampler(rio_light_ps->samplerVars,
@@ -883,8 +947,8 @@ void main()
    CHECK(VertexExportSemantic(rio_named_varying_vs, 0) ==
          PixelInputSemantic(rio_named_varying_ps, 0));
 
-   /* RIO declares its blocks without a binding, which we do not accept yet. Locked in
-    * so the day it starts compiling is not a silent change.
+   /* RIO declares its blocks without a binding, the way GLSL 150 forces. A lone
+    * block lands in bank 1.
     */
    GX2VertexShader *rio_implicit_block_vs = CompileVertexShader(
       "#version 330 core\n"
@@ -907,8 +971,19 @@ void main()
       diagnostics,
       sizeof(diagnostics),
       GLSL_COMPILER_FLAG_NONE);
-   CHECK(!rio_implicit_block_vs);
-   CHECK(strstr(diagnostics, "explicit UBO bindings"));
+   if (!rio_implicit_block_vs) {
+      fprintf(stderr, "RIO-Tests 08 without a binding failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(rio_implicit_block_vs->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
+   CHECK(FindUniformBlock(rio_implicit_block_vs->uniformBlocks,
+                          rio_implicit_block_vs->uniformBlockCount,
+                          "cViewBlock") == 1);
+   const GX2UniformVar *rio_implicit_view_proj = FindUniform(
+      rio_implicit_block_vs->uniformVars,
+      rio_implicit_block_vs->uniformVarCount, "viewProj");
+   CHECK(rio_implicit_view_proj && rio_implicit_view_proj->offset == 4);
+   CHECK(rio_implicit_view_proj->count == 4 && rio_implicit_view_proj->block == 0);
 
    /* Adding the binding is not enough: #version 330 core has no binding qualifier
     * without ARB_shading_language_420pack.
@@ -957,8 +1032,30 @@ void main()
    /* std140 rounds the leading vec3 up to a full vec4 before the array starts. */
    const GX2UniformVar *rio_view_proj = FindUniform(
       rio_bound_block_vs->uniformVars, rio_bound_block_vs->uniformVarCount, "viewProj");
-   CHECK(rio_view_proj && rio_view_proj->offset == 16);
+   CHECK(rio_view_proj && rio_view_proj->offset == 4);
    CHECK(rio_view_proj->count == 4 && rio_view_proj->block == 0);
+
+   /* A block that names its bank keeps it and the rest fit around it. */
+   GX2VertexShader *pinned_block_vs = CompileVertexShader(
+      "#version 150\n"
+      "#extension GL_ARB_shading_language_420pack : require\n"
+      "layout(std140) uniform Mat { vec4 mat_color0; };\n"
+      "layout(std140, binding = 0) uniform MdlMtx { vec4 cWorld; };\n"
+      "layout(std140) uniform Shp { vec4 cShpMtx; };\n"
+      "void main() { gl_Position = mat_color0 + cWorld + cShpMtx; }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!pinned_block_vs) {
+      fprintf(stderr, "Mixed block bindings failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(FindUniformBlock(pinned_block_vs->uniformBlocks,
+                          pinned_block_vs->uniformBlockCount, "MdlMtx") == 0);
+   CHECK(FindUniformBlock(pinned_block_vs->uniformBlocks,
+                          pinned_block_vs->uniformBlockCount, "Shp") == 1);
+   CHECK(FindUniformBlock(pinned_block_vs->uniformBlocks,
+                          pinned_block_vs->uniformBlockCount, "Mat") == 2);
 
    /* agl prepends "#version 330" to GX2 shader source, so SDK-era shaders often omit
     * the directive - some of NSMBU's declare std140 blocks with no #version at all,
@@ -1085,6 +1182,280 @@ void main()
    CHECK(FindAttribute(valid_paste_vs->attribVars,
                        valid_paste_vs->attribVarCount, "attr_one") >= 0);
 
+   /* Retail layout: uniform offsets in 4-byte words, block sizes in bytes. */
+   GX2VertexShader *nsmbu_layout_vs = CompileVertexShader(
+      "#version 150\n"
+      NSMBU_MAT_BLOCK
+      "layout(std140) uniform MdlEnvView {\n"
+      "   vec4 cView[3];\n"
+      "   vec4 cViewProj[4];\n"
+      "   vec3 cLightDiffDir[8];\n"
+      "   vec4 cLightDiffColor[8];\n"
+      "   vec4 cAmbColor[2];\n"
+      "   vec3 cFogColor[8];\n"
+      "   float cFogStart[8];\n"
+      "   float cFogStartEndInv[8];\n"
+      "};\n"
+      "layout(std140) uniform MdlMtx { vec4 cMtxPalette[192]; };\n"
+      "layout(std140) uniform Shp { int cWeightNum; };\n"
+      "in ivec4 aBlendIndex;\n"
+      "in vec4 aBlendWeight;\n"
+      "in vec3 aNormal;\n"
+      "in vec3 aPosition;\n"
+      "in vec2 aTexCoord0;\n"
+      "void main() {\n"
+      "   vec4 skinned = cMtxPalette[aBlendIndex.x] * aBlendWeight.x +\n"
+      "                  cMtxPalette[aBlendIndex.y] * aBlendWeight.y;\n"
+      "   vec4 env = cView[0] + cViewProj[3] +\n"
+      "              vec4(cLightDiffDir[7], 0.0) + cLightDiffColor[6] +\n"
+      "              cAmbColor[1] + vec4(cFogColor[5], 0.0) +\n"
+      "              vec4(cFogStart[4] + cFogStartEndInv[3]);\n"
+      "   gl_Position = skinned + env + " NSMBU_MAT_SUM " +\n"
+      "                 vec4(aPosition, 1.0) + vec4(aNormal, 0.0) +\n"
+      "                 vec4(aTexCoord0, 0.0, 0.0) + vec4(float(cWeightNum));\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!nsmbu_layout_vs) {
+      fprintf(stderr, "NSMBU retail layout failed: %s\n", diagnostics);
+      return 1;
+   }
+
+   /* Blocks run from bank 1 at the last declaration upwards. */
+   CHECK(FindUniformBlock(nsmbu_layout_vs->uniformBlocks,
+                          nsmbu_layout_vs->uniformBlockCount, "Shp") == 1);
+   CHECK(FindUniformBlock(nsmbu_layout_vs->uniformBlocks,
+                          nsmbu_layout_vs->uniformBlockCount, "MdlMtx") == 2);
+   CHECK(FindUniformBlock(nsmbu_layout_vs->uniformBlocks,
+                          nsmbu_layout_vs->uniformBlockCount, "MdlEnvView") == 3);
+   CHECK(FindUniformBlock(nsmbu_layout_vs->uniformBlocks,
+                          nsmbu_layout_vs->uniformBlockCount, "Mat") == 4);
+
+   static const struct {
+      const char *name;
+      uint32_t size;
+   } kNsmbuBlockSizes[] = {
+      { "Shp", 4 }, { "MdlMtx", 3072 }, { "MdlEnvView", 784 }, { "Mat", 656 },
+   };
+   for (const auto &expected : kNsmbuBlockSizes) {
+      const int index = FindUniformBlockIndex(nsmbu_layout_vs->uniformBlocks,
+                                              nsmbu_layout_vs->uniformBlockCount,
+                                              expected.name);
+      CHECK(index >= 0);
+      CHECK(nsmbu_layout_vs->uniformBlocks[index].size == expected.size);
+   }
+
+   static const struct {
+      const char *name;
+      uint32_t offset;
+      uint32_t count;
+      uint32_t type;
+   } kNsmbuUniforms[] = {
+      { "cView",            0,   3,   GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "cViewProj",        12,  4,   GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "cLightDiffDir",    28,  8,   GX2_SHADER_VAR_TYPE_FLOAT3 },
+      { "cLightDiffColor",  60,  8,   GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "cAmbColor",        92,  2,   GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "cFogColor",        100, 8,   GX2_SHADER_VAR_TYPE_FLOAT3 },
+      { "cFogStart",        132, 8,   GX2_SHADER_VAR_TYPE_FLOAT },
+      { "cFogStartEndInv",  164, 8,   GX2_SHADER_VAR_TYPE_FLOAT },
+      { "cMtxPalette",      0,   192, GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "cWeightNum",       0,   1,   GX2_SHADER_VAR_TYPE_INT },
+      { "mat_color0",       0,   1,   GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "ind_texmtx0",      44,  2,   GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "texmtx0",          68,  3,   GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "texmtx7",          152, 3,   GX2_SHADER_VAR_TYPE_FLOAT4 },
+   };
+   for (const auto &expected : kNsmbuUniforms) {
+      const GX2UniformVar *uniform = FindUniform(nsmbu_layout_vs->uniformVars,
+                                                 nsmbu_layout_vs->uniformVarCount,
+                                                 expected.name);
+      CHECK(uniform);
+      CHECK(uniform->offset == expected.offset);
+      CHECK(uniform->count == expected.count);
+      CHECK(uniform->type == expected.type);
+   }
+
+   /* Attribute locations follow declaration order. */
+   static const char *const kNsmbuAttribs[] = {
+      "aBlendIndex", "aBlendWeight", "aNormal", "aPosition", "aTexCoord0",
+   };
+   for (uint32_t i = 0; i < sizeof(kNsmbuAttribs) / sizeof(kNsmbuAttribs[0]); ++i) {
+      CHECK(FindAttribute(nsmbu_layout_vs->attribVars,
+                          nsmbu_layout_vs->attribVarCount,
+                          kNsmbuAttribs[i]) == static_cast<int>(i));
+   }
+
+   /* The pixel stage's only block takes bank 1. */
+   GX2PixelShader *nsmbu_layout_ps = CompilePixelShader(
+      "#version 150\n"
+      NSMBU_MAT_BLOCK
+      "uniform sampler2D tex_map0;\n"
+      "in vec4 vTexCoord;\n"
+      "out vec4 oColor;\n"
+      "void main() {\n"
+      "   oColor = texture(tex_map0, vTexCoord.xy) * " NSMBU_MAT_SUM ";\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!nsmbu_layout_ps) {
+      fprintf(stderr, "NSMBU retail pixel layout failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(FindUniformBlock(nsmbu_layout_ps->uniformBlocks,
+                          nsmbu_layout_ps->uniformBlockCount, "Mat") == 1);
+   const int nsmbu_ps_mat = FindUniformBlockIndex(
+      nsmbu_layout_ps->uniformBlocks, nsmbu_layout_ps->uniformBlockCount, "Mat");
+   CHECK(nsmbu_ps_mat >= 0);
+   CHECK(nsmbu_layout_ps->uniformBlocks[nsmbu_ps_mat].size == 656);
+   CHECK(FindSampler(nsmbu_layout_ps->samplerVars,
+                     nsmbu_layout_ps->samplerVarCount, "tex_map0") == 0);
+
+   /* Uniform-block mode, empty ring, no stream out, on both stages. */
+   CHECK(nsmbu_layout_vs->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
+   CHECK(nsmbu_layout_ps->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
+   CHECK(nsmbu_layout_vs->ringItemsize == 0);
+   CHECK(!nsmbu_layout_vs->hasStreamOut);
+   for (uint32_t i = 0; i < 4; ++i)
+      CHECK(nsmbu_layout_vs->streamOutStride[i] == 0);
+
+   /* Attributes record count 0. */
+   static const struct {
+      const char *name;
+      uint32_t type;
+   } kNsmbuAttribTypes[] = {
+      { "aBlendIndex",  GX2_SHADER_VAR_TYPE_INT4 },
+      { "aBlendWeight", GX2_SHADER_VAR_TYPE_FLOAT4 },
+      { "aNormal",      GX2_SHADER_VAR_TYPE_FLOAT3 },
+      { "aPosition",    GX2_SHADER_VAR_TYPE_FLOAT3 },
+      { "aTexCoord0",   GX2_SHADER_VAR_TYPE_FLOAT2 },
+   };
+   for (const auto &expected : kNsmbuAttribTypes) {
+      const GX2AttribVar *attrib = FindAttribVar(nsmbu_layout_vs->attribVars,
+                                                 nsmbu_layout_vs->attribVarCount,
+                                                 expected.name);
+      CHECK(attrib);
+      CHECK(attrib->type == expected.type);
+      CHECK(attrib->count == 0);
+   }
+
+   /* A gap in the attribute names is not a gap in the locations. */
+   GX2VertexShader *nsmbu_attrib_gap_vs = CompileVertexShader(
+      "#version 150\n"
+      "in ivec4 aBlendIndex;\n"
+      "in vec4 aBlendWeight;\n"
+      "in vec3 aNormal;\n"
+      "in vec3 aPosition;\n"
+      "in vec2 aTexCoord1;\n"
+      "void main() {\n"
+      "   gl_Position = vec4(aPosition, 1.0) + aBlendWeight + vec4(aNormal, 0.0) +\n"
+      "                 vec4(aTexCoord1, 0.0, 0.0) + vec4(aBlendIndex);\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!nsmbu_attrib_gap_vs) {
+      fprintf(stderr, "NSMBU sparse attribute set failed: %s\n", diagnostics);
+      return 1;
+   }
+   static const char *const kNsmbuGapAttribs[] = {
+      "aBlendIndex", "aBlendWeight", "aNormal", "aPosition", "aTexCoord1",
+   };
+   for (uint32_t i = 0; i < sizeof(kNsmbuGapAttribs) / sizeof(kNsmbuGapAttribs[0]); ++i) {
+      CHECK(FindAttribute(nsmbu_attrib_gap_vs->attribVars,
+                          nsmbu_attrib_gap_vs->attribVarCount,
+                          kNsmbuGapAttribs[i]) == static_cast<int>(i));
+   }
+
+   /* The six-attribute retail set, with a colour. */
+   GX2VertexShader *nsmbu_attrib_color_vs = CompileVertexShader(
+      "#version 150\n"
+      "in ivec4 aBlendIndex;\n"
+      "in vec4 aBlendWeight;\n"
+      "in vec4 aColor0;\n"
+      "in vec3 aNormal;\n"
+      "in vec3 aPosition;\n"
+      "in vec2 aTexCoord0;\n"
+      "void main() {\n"
+      "   gl_Position = vec4(aPosition, 1.0) + aBlendWeight + aColor0 +\n"
+      "                 vec4(aNormal, 0.0) + vec4(aTexCoord0, 0.0, 0.0) +\n"
+      "                 vec4(aBlendIndex);\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!nsmbu_attrib_color_vs) {
+      fprintf(stderr, "NSMBU coloured attribute set failed: %s\n", diagnostics);
+      return 1;
+   }
+   static const char *const kNsmbuColorAttribs[] = {
+      "aBlendIndex", "aBlendWeight", "aColor0", "aNormal", "aPosition", "aTexCoord0",
+   };
+   for (uint32_t i = 0; i < sizeof(kNsmbuColorAttribs) / sizeof(kNsmbuColorAttribs[0]); ++i) {
+      CHECK(FindAttribute(nsmbu_attrib_color_vs->attribVars,
+                          nsmbu_attrib_color_vs->attribVarCount,
+                          kNsmbuColorAttribs[i]) == static_cast<int>(i));
+   }
+
+   /* Sampler units follow declaration order. */
+   GX2PixelShader *nsmbu_sampler_gap_ps = CompilePixelShader(
+      "#version 150\n"
+      "uniform sampler2D tex_map0;\n"
+      "uniform sampler2D tex_map2;\n"
+      "in vec4 vTexCoord;\n"
+      "out vec4 oColor;\n"
+      "void main() {\n"
+      "   oColor = texture(tex_map0, vTexCoord.xy) + texture(tex_map2, vTexCoord.zw);\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!nsmbu_sampler_gap_ps) {
+      fprintf(stderr, "NSMBU sparse sampler set failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(FindSampler(nsmbu_sampler_gap_ps->samplerVars,
+                     nsmbu_sampler_gap_ps->samplerVarCount, "tex_map0") == 0);
+   CHECK(FindSampler(nsmbu_sampler_gap_ps->samplerVars,
+                     nsmbu_sampler_gap_ps->samplerVarCount, "tex_map2") == 1);
+
+   /* Six consecutive units, all 2D. */
+   GX2PixelShader *nsmbu_sampler_six_ps = CompilePixelShader(
+      "#version 150\n"
+      "uniform sampler2D tex_map0;\n"
+      "uniform sampler2D tex_map1;\n"
+      "uniform sampler2D tex_map2;\n"
+      "uniform sampler2D tex_map3;\n"
+      "uniform sampler2D tex_map4;\n"
+      "uniform sampler2D tex_map5;\n"
+      "in vec4 vTexCoord;\n"
+      "out vec4 oColor;\n"
+      "void main() {\n"
+      "   oColor = texture(tex_map0, vTexCoord.xy) + texture(tex_map1, vTexCoord.xy) +\n"
+      "            texture(tex_map2, vTexCoord.xy) + texture(tex_map3, vTexCoord.xy) +\n"
+      "            texture(tex_map4, vTexCoord.xy) + texture(tex_map5, vTexCoord.xy);\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!nsmbu_sampler_six_ps) {
+      fprintf(stderr, "NSMBU six-sampler set failed: %s\n", diagnostics);
+      return 1;
+   }
+   static const char *const kNsmbuSamplers[] = {
+      "tex_map0", "tex_map1", "tex_map2", "tex_map3", "tex_map4", "tex_map5",
+   };
+   for (uint32_t i = 0; i < sizeof(kNsmbuSamplers) / sizeof(kNsmbuSamplers[0]); ++i) {
+      const GX2SamplerVar *sampler = FindSamplerVar(nsmbu_sampler_six_ps->samplerVars,
+                                                    nsmbu_sampler_six_ps->samplerVarCount,
+                                                    kNsmbuSamplers[i]);
+      CHECK(sampler);
+      CHECK(sampler->location == i);
+      CHECK(sampler->type == GX2_SAMPLER_VAR_TYPE_SAMPLER_2D);
+   }
+
    GX2PixelShader *invalid = CompilePixelShader(
       "#version 450\nthis is invalid;",
       diagnostics,
@@ -1096,13 +1467,21 @@ void main()
    FreeVertexShader(rio_primitive_vs);
    FreeVertexShader(rio_mvp_vs);
    FreeVertexShader(rio_named_varying_vs);
+   FreeVertexShader(rio_implicit_block_vs);
    FreeVertexShader(rio_bound_block_vs);
+   FreeVertexShader(pinned_block_vs);
    FreeVertexShader(implicit_version_vs);
    FreeVertexShader(implicit_version_pp_vs);
    FreeVertexShader(declared_version_vs);
    FreeVertexShader(implicit_version_compat_vs);
    FreeVertexShader(adjacent_paste_vs);
    FreeVertexShader(valid_paste_vs);
+   FreeVertexShader(nsmbu_layout_vs);
+   FreePixelShader(nsmbu_layout_ps);
+   FreeVertexShader(nsmbu_attrib_gap_vs);
+   FreeVertexShader(nsmbu_attrib_color_vs);
+   FreePixelShader(nsmbu_sampler_gap_ps);
+   FreePixelShader(nsmbu_sampler_six_ps);
    FreePixelShader(rio_primitive_ps);
    FreePixelShader(rio_mix_ps);
    FreePixelShader(rio_light_ps);

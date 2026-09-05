@@ -219,6 +219,86 @@ static bool AssignSamplerBindings(nir_shader *nir,
    return true;
 }
 
+/* An instance array is linearised into one gl_uniform_block per element,
+ * named "Block[i]", while the variable only names the interface. */
+static bool BlockBelongsTo(const gl_uniform_block *block, const char *name)
+{
+   const char *block_name = block->name.string;
+   if (!block_name)
+      return false;
+
+   const size_t length = strlen(name);
+   return !strcmp(block_name, name) ||
+          (!strncmp(block_name, name, length) && block_name[length] == '[');
+}
+
+static const char *BlockInterfaceName(const nir_variable *variable)
+{
+   return variable->interface_type ?
+      glsl_get_type_name(variable->interface_type) : nullptr;
+}
+
+/* Bank 0 carries the non-block uniforms, so blocks run from bank 1 backwards
+ * through the declarations. An explicit binding keeps the bank it names. */
+static bool AssignUniformBlockBindings(nir_shader *nir,
+                                       gl_program *program,
+                                       bool reserve_default_block,
+                                       std::string &diagnostics)
+{
+   const unsigned num_blocks = program->info.num_ubos;
+   std::vector<bool> pinned(num_blocks, false);
+   std::array<bool, kMaxUniformBlocks> used{};
+
+   if (reserve_default_block)
+      used[kDefaultUniformBlockBinding] = true;
+
+   nir_foreach_variable_with_modes(variable, nir, nir_var_mem_ubo) {
+      const char *name = BlockInterfaceName(variable);
+      if (!variable->data.explicit_binding || !name)
+         continue;
+
+      for (unsigned index = 0; index < num_blocks; ++index) {
+         gl_uniform_block *block = program->sh.UniformBlocks[index];
+         if (pinned[index] || !BlockBelongsTo(block, name))
+            continue;
+
+         if (block->Binding >= kMaxUniformBlocks) {
+            diagnostics = "Uniform block binding exceeds Latte's 16 uniform-block slots";
+            return false;
+         }
+         if (used[block->Binding]) {
+            diagnostics = block->Binding == kDefaultUniformBlockBinding ?
+               "Uniform block binding 0 is reserved for non-block uniforms in "
+               "shaders that also use uniform blocks" :
+               "Overlapping explicit uniform block bindings";
+            return false;
+         }
+         pinned[index] = true;
+         used[block->Binding] = true;
+      }
+   }
+
+   /* UniformBlocks[] comes off the parser's variable list, so index 0 is the
+    * block declared last. */
+   for (unsigned i = 0; i < num_blocks; ++i) {
+      if (pinned[i])
+         continue;
+
+      unsigned binding = kDefaultUniformBlockBinding + 1;
+      while (binding < kMaxUniformBlocks && used[binding])
+         ++binding;
+      if (binding >= kMaxUniformBlocks) {
+         diagnostics = "No free Latte uniform block binding";
+         return false;
+      }
+
+      program->sh.UniformBlocks[i]->Binding = binding;
+      used[binding] = true;
+   }
+
+   return true;
+}
+
 struct UboRemapState {
    const std::vector<unsigned> *bindings;
    bool valid = true;
@@ -371,6 +451,18 @@ static int FindParameterOffset(const gl_program *program, unsigned uniform_index
    return -1;
 }
 
+/* GX2 sizes a block by its last member. */
+static uint32_t UniformBlockSize(const gl_uniform_block *block)
+{
+   uint32_t size = 0;
+   for (unsigned i = 0; i < block->NumUniforms; ++i) {
+      const gl_uniform_buffer_variable *variable = &block->Uniforms[i];
+      size = MAX2(size, variable->Offset +
+                        glsl_get_std140_size(variable->Type, variable->RowMajor));
+   }
+   return size;
+}
+
 static bool BuildReflection(gl_shader_program *shader_program,
                      gl_program *program,
                      mesa_shader_stage stage,
@@ -396,7 +488,7 @@ static bool BuildReflection(gl_shader_program *shader_program,
       }
 
       const int output_index = static_cast<int>(reflection.blocks.size());
-      reflection.blocks.push_back({name, block->Binding, block->UniformBufferSize});
+      reflection.blocks.push_back({name, block->Binding, UniformBlockSize(block)});
 
       for (unsigned block_index = 0; block_index < program->info.num_ubos; ++block_index) {
          if (program->sh.UniformBlocks[block_index] == block)
@@ -420,9 +512,10 @@ static bool BuildReflection(gl_shader_program *shader_program,
                           "' cannot be represented by GX2";
             return false;
          }
+         /* GX2 counts a non-array attribute as 0. */
          reflection.attributes.push_back(
             {name, type, glsl_type_is_array(variable->type) ?
-                         glsl_get_aoa_size(variable->type) : 1,
+                         glsl_get_aoa_size(variable->type) : 0,
              static_cast<uint32_t>(variable->location)});
          continue;
       }
@@ -527,7 +620,8 @@ static bool CopyReflection(const ReflectionInfo &reflection, Shader *shader)
          return false;
       shader->uniformVars[i].type = reflection.uniforms[i].type;
       shader->uniformVars[i].count = reflection.uniforms[i].count;
-      shader->uniformVars[i].offset = reflection.uniforms[i].offset;
+      /* GX2 counts uniform offsets in registers. */
+      shader->uniformVars[i].offset = reflection.uniforms[i].offset / 4;
       shader->uniformVars[i].block = reflection.uniforms[i].block;
    }
    for (unsigned i = 0; i < reflection.samplers.size(); ++i) {
@@ -1055,6 +1149,14 @@ bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
        !BuildVertexSemanticMap(state.nir, state.vertex_semantics, diagnostics))
       return false;
 
+   const bool reserve_default_block = state.program->Parameters &&
+      state.program->Parameters->NumParameterValues != 0 &&
+      state.program->info.num_ubos != 0;
+
+   if (!AssignUniformBlockBindings(state.nir, state.program,
+                                   reserve_default_block, diagnostics))
+      return false;
+
    for (unsigned i = 0; i < state.program->info.num_ubos; ++i) {
       const gl_uniform_block *block = state.program->sh.UniformBlocks[i];
       if (block->Binding >= kMaxUniformBlocks) {
@@ -1062,13 +1164,6 @@ bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
          return false;
       }
       state.ubo_bindings.push_back(block->Binding);
-   }
-
-   nir_foreach_variable_with_modes(variable, state.nir, nir_var_mem_ubo) {
-      if (!variable->data.explicit_binding) {
-         diagnostics = "CafeGLSL currently requires explicit UBO bindings";
-         return false;
-      }
    }
 
    if (!AssignSamplerBindings(state.nir, state.sampler_bindings, diagnostics))
