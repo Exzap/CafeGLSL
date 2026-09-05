@@ -1691,8 +1691,10 @@ Shader::load_ubo(nir_intrinsic_instr *instr)
             dest, dest_swz, addr, 0, base_id, buffer_id, fmt_32_32_32_32_float);
       }
 #if defined(CAFE_COMPILER) || defined(__WUT__)
-      /* Latte routes dynamic uniform-buffer reads through TEX clauses. */
+      /* Latte routes dynamic uniform-buffer reads through TEX clauses, and takes
+       * the fetch format from the bound buffer resource. */
       ir->set_fetch_flag(FetchInstr::use_tc);
+      ir->set_fetch_flag(FetchInstr::use_const_field);
 #endif
       emit_instruction(ir);
       return true;

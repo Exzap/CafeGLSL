@@ -78,9 +78,9 @@ static bool HasControlFlowOpcode(const void *program, uint32_t size, uint32_t op
    return false;
 }
 
-static bool HasVFetchInTexClause(const void *program,
-                                 uint32_t size,
-                                 uint32_t resource_id)
+static const uint32_t *FindVFetchInTexClause(const void *program,
+                                             uint32_t size,
+                                             uint32_t resource_id)
 {
    const auto *words = static_cast<const uint32_t *>(program);
    const uint32_t word_count = size / sizeof(uint32_t);
@@ -96,18 +96,24 @@ static bool HasVFetchInTexClause(const void *program,
          const uint32_t clause_start = word0 * 2;
          for (uint32_t fetch = 0; fetch < count; ++fetch) {
             const uint32_t fetch_word = clause_start + fetch * 4;
-            if (fetch_word >= word_count)
+            if (fetch_word + 4 > word_count)
                break;
             const uint32_t vtx_word0 = words[fetch_word];
             if ((vtx_word0 & 0x1f) == kVFetch &&
                 ((vtx_word0 >> 8) & 0xff) == resource_id)
-               return true;
+               return &words[fetch_word];
          }
       }
       if (word1 & (1u << 21))
          break;
    }
-   return false;
+   return nullptr;
+}
+
+/* VTX_WORD1.USE_CONST_FIELDS */
+static bool VFetchUsesConstFields(const uint32_t *fetch)
+{
+   return (fetch[1] & (1u << 21)) != 0;
 }
 
 static bool HasAluConstSource(const void *program,
@@ -560,7 +566,10 @@ void main() {
    CHECK(HasControlFlowOpcode(vertex_id->program, vertex_id->size, kCfTex));
    CHECK(!HasControlFlowOpcode(vertex_id->program, vertex_id->size, kCfVtx));
    CHECK(!HasControlFlowOpcode(vertex_id->program, vertex_id->size, kCfVtxTc));
-   CHECK(HasVFetchInTexClause(vertex_id->program, vertex_id->size, 0x83));
+   const uint32_t *vertex_id_fetch =
+      FindVFetchInTexClause(vertex_id->program, vertex_id->size, 0x83);
+   CHECK(vertex_id_fetch);
+   CHECK(VFetchUsesConstFields(vertex_id_fetch));
 
    GX2PixelShader *environment_pass = CompilePixelShader(
       "#version 450\n"
