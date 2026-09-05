@@ -27,7 +27,7 @@ env:
     --buildtype=release
 
   # A bare `meson test` would pull in Mesa's own tests, which this build lacks.
-  MESON_TESTS: cafeglsl-smoke cafeglsl-skinning-regression
+  MESON_TESTS: cafeglsl-smoke cafeglsl-skinning-regression cafeglsl-uber-regression
 
 jobs:
   linux:

@@ -89,9 +89,17 @@ if host_machine.system() != 'cafeos'
     install : true,
   )
 
+  # use CLI to test a tricky shader
   test(
     'cafeglsl-skinning-regression',
     cafeglsl_cli,
     args : ['-vs'] + files('testdata/skinning-regression.vert'),
+  )
+
+  # use CLI to test various shader setups that NSMBU also uses
+  test(
+    'cafeglsl-uber-regression',
+    cafeglsl_cli,
+    args : ['-vs'] + files('testdata/nsmbu-uber.vert'),
   )
 endif
