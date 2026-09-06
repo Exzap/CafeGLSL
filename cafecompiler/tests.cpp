@@ -1185,7 +1185,6 @@ void main()
    /* Retail layout: uniform offsets in 4-byte words, block sizes in bytes. */
    GX2VertexShader *nsmbu_layout_vs = CompileVertexShader(
       "#version 150\n"
-      NSMBU_MAT_BLOCK
       "layout(std140) uniform MdlEnvView {\n"
       "   vec4 cView[3];\n"
       "   vec4 cViewProj[4];\n"
@@ -1198,6 +1197,7 @@ void main()
       "};\n"
       "layout(std140) uniform MdlMtx { vec4 cMtxPalette[192]; };\n"
       "layout(std140) uniform Shp { int cWeightNum; };\n"
+      NSMBU_MAT_BLOCK
       "in ivec4 aBlendIndex;\n"
       "in vec4 aBlendWeight;\n"
       "in vec3 aNormal;\n"

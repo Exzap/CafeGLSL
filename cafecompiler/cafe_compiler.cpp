@@ -278,22 +278,34 @@ static bool AssignUniformBlockBindings(nir_shader *nir,
       }
    }
 
-   /* UniformBlocks[] comes off the parser's variable list, so index 0 is the
-    * block declared last. */
+   /* Blocks take their bank from their name, counting down from the block
+    * count so that bank 0 stays with the non-block uniforms. */
+   std::vector<unsigned> unbound;
    for (unsigned i = 0; i < num_blocks; ++i) {
-      if (pinned[i])
-         continue;
+      if (!pinned[i])
+         unbound.push_back(i);
+   }
+   std::sort(unbound.begin(), unbound.end(), [&](unsigned a, unsigned b) {
+      const gl_resource_name &na = program->sh.UniformBlocks[a]->name;
+      const gl_resource_name &nb = program->sh.UniformBlocks[b]->name;
+      return strcmp(na.string ? na.string : "", nb.string ? nb.string : "") < 0;
+   });
 
-      unsigned binding = kDefaultUniformBlockBinding + 1;
-      while (binding < kMaxUniformBlocks && used[binding])
-         ++binding;
-      if (binding >= kMaxUniformBlocks) {
-         diagnostics = "No free Latte uniform block binding";
-         return false;
-      }
+   std::vector<unsigned> free_banks;
+   for (unsigned bank = kDefaultUniformBlockBinding + 1;
+        bank < kMaxUniformBlocks && free_banks.size() < unbound.size(); ++bank) {
+      if (!used[bank])
+         free_banks.push_back(bank);
+   }
+   if (free_banks.size() < unbound.size()) {
+      diagnostics = "No free Latte uniform block binding";
+      return false;
+   }
 
-      program->sh.UniformBlocks[i]->Binding = binding;
-      used[binding] = true;
+   for (unsigned i = 0; i < unbound.size(); ++i) {
+      const unsigned bank = free_banks[free_banks.size() - 1 - i];
+      program->sh.UniformBlocks[unbound[i]]->Binding = bank;
+      used[bank] = true;
    }
 
    return true;
@@ -494,6 +506,27 @@ static bool BuildReflection(gl_shader_program *shader_program,
          if (program->sh.UniformBlocks[block_index] == block)
             block_to_output[block_index] = output_index;
       }
+   }
+
+   /* The block table is listed by name, which is the order the banks run in. */
+   std::vector<unsigned> block_order(reflection.blocks.size());
+   for (unsigned i = 0; i < block_order.size(); ++i) {
+      block_order[i] = i;
+   }
+   std::sort(block_order.begin(), block_order.end(), [&](unsigned a, unsigned b) {
+      return reflection.blocks[a].name < reflection.blocks[b].name;
+   });
+
+   std::vector<UniformBlockInfo> sorted_blocks;
+   std::vector<int> block_remap(reflection.blocks.size());
+   for (unsigned i = 0; i < block_order.size(); ++i) {
+      block_remap[block_order[i]] = static_cast<int>(i);
+      sorted_blocks.push_back(reflection.blocks[block_order[i]]);
+   }
+   reflection.blocks = std::move(sorted_blocks);
+   for (int &output : block_to_output) {
+      if (output >= 0)
+         output = block_remap[output];
    }
 
    const gl_uniform_storage *uniform_base = shader_program->data->UniformStorage;
