@@ -1,6 +1,7 @@
 #include "CafeGLSLCompiler.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #define CHECK(condition)                                                        \
@@ -75,6 +76,26 @@ static const GX2SamplerVar *FindSamplerVar(const GX2SamplerVar *samplers,
    return nullptr;
 }
 
+/* "a" belongs before "b" in a uniform table: by name, and for an array by the
+ * subscript read as a number rather than as text.
+ */
+static bool UniformRowsOrdered(const char *a, const char *b)
+{
+   const char *sub_a = strchr(a, '[');
+   const char *sub_b = strchr(b, '[');
+   const size_t len_a = sub_a ? static_cast<size_t>(sub_a - a) : strlen(a);
+   const size_t len_b = sub_b ? static_cast<size_t>(sub_b - b) : strlen(b);
+
+   const int order = strncmp(a, b, len_a < len_b ? len_a : len_b);
+   if (order != 0)
+      return order < 0;
+   if (len_a != len_b)
+      return len_a < len_b;
+
+   return (sub_a ? strtol(sub_a + 1, nullptr, 10) : -1) <=
+          (sub_b ? strtol(sub_b + 1, nullptr, 10) : -1);
+}
+
 static const GX2UniformVar *FindUniform(const GX2UniformVar *uniforms,
                                        uint32_t count,
                                        const char *name)
@@ -85,6 +106,56 @@ static const GX2UniformVar *FindUniform(const GX2UniformVar *uniforms,
    }
    return nullptr;
 }
+
+/* The layout rules every compiled shader in NSMBU and Mario Kart 8 obeys, on
+ * both agl generations. What each game does beyond this differs, so only these
+ * are checked here.
+ */
+template <typename Shader>
+static bool SharedLayoutHolds(const char *what, const Shader *shader)
+{
+   for (uint32_t i = 0; i < shader->uniformBlockCount; ++i) {
+      const uint32_t bank = shader->uniformBlocks[i].offset;
+      if (bank < 1 || bank > shader->uniformBlockCount) {
+         fprintf(stderr, "%s: block %s sits on bank %u, outside 1..%u\n",
+                 what, shader->uniformBlocks[i].name, bank, shader->uniformBlockCount);
+         return false;
+      }
+      for (uint32_t j = i + 1; j < shader->uniformBlockCount; ++j) {
+         if (bank == shader->uniformBlocks[j].offset) {
+            fprintf(stderr, "%s: two blocks share bank %u\n", what, bank);
+            return false;
+         }
+      }
+   }
+
+   for (uint32_t i = 0; i < shader->uniformVarCount; ++i) {
+      const GX2UniformVar &uniform = shader->uniformVars[i];
+      if (shader->uniformBlockCount && uniform.block < 0) {
+         fprintf(stderr, "%s: %s is blockless in a shader that has blocks\n",
+                 what, uniform.name);
+         return false;
+      }
+      if (i && !UniformRowsOrdered(shader->uniformVars[i - 1].name, uniform.name)) {
+         fprintf(stderr, "%s: %s follows %s\n", what, uniform.name,
+                 shader->uniformVars[i - 1].name);
+         return false;
+      }
+      if (uniform.count > 1 && !strchr(uniform.name, '[')) {
+         for (uint32_t element = 0; element < uniform.count; ++element) {
+            char row[128];
+            snprintf(row, sizeof(row), "%s[%u]", uniform.name, element);
+            if (!FindUniform(shader->uniformVars, shader->uniformVarCount, row)) {
+               fprintf(stderr, "%s: array %s has no %s row\n", what, uniform.name, row);
+               return false;
+            }
+         }
+      }
+   }
+
+   return true;
+}
+
 
 static bool HasControlFlowOpcode(const void *program, uint32_t size, uint32_t opcode)
 {
@@ -1467,6 +1538,57 @@ void main()
       CHECK(sampler->type == GX2_SAMPLER_VAR_TYPE_SAMPLER_2D);
    }
 
+   /* Blocks declared out of name order, one of them an array, and an attribute
+    * the shader never reads, so nothing here leans on NSMBU's own ordering.
+    */
+   GX2VertexShader *shared_layout_vs = CompileVertexShader(
+      "#version 150\n"
+      "layout(std140) uniform Zulu { vec4 zPos; };\n"
+      "layout(std140) uniform Alpha { vec4 aMtx[3]; int aCount; };\n"
+      "layout(std140) uniform Mike { vec4 mTint; };\n"
+      "in vec4 aPosition;\n"
+      "in vec4 aUnused;\n"
+      "void main() {\n"
+      "   gl_Position = zPos + aMtx[aCount] + mTint + aPosition;\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!shared_layout_vs) {
+      fprintf(stderr, "Shared layout vertex shader failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(SharedLayoutHolds("vertex", shared_layout_vs));
+   CHECK(shared_layout_vs->uniformBlockCount == 3);
+   CHECK(shared_layout_vs->ringItemsize == 0);
+   CHECK(!shared_layout_vs->hasStreamOut);
+   for (uint32_t i = 0; i < 4; ++i)
+      CHECK(shared_layout_vs->streamOutStride[i] == 0);
+   for (uint32_t i = 0; i < shared_layout_vs->attribVarCount; ++i)
+      CHECK(shared_layout_vs->attribVars[i].count == 0);
+
+   GX2PixelShader *shared_layout_ps = CompilePixelShader(
+      "#version 150\n"
+      "layout(std140) uniform Zulu { vec4 zTint; };\n"
+      "layout(std140) uniform Alpha { vec4 aBias[2]; };\n"
+      "uniform sampler2D texMap;\n"
+      "in vec4 vTexCoord;\n"
+      "out vec4 oColor;\n"
+      "void main() {\n"
+      "   oColor = texture(texMap, vTexCoord.xy) + zTint + aBias[1];\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!shared_layout_ps) {
+      fprintf(stderr, "Shared layout pixel shader failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(SharedLayoutHolds("pixel", shared_layout_ps));
+   CHECK(shared_layout_ps->uniformBlockCount == 2);
+   CHECK(FindSampler(shared_layout_ps->samplerVars,
+                     shared_layout_ps->samplerVarCount, "texMap") == 0);
+
    GX2PixelShader *invalid = CompilePixelShader(
       "#version 450\nthis is invalid;",
       diagnostics,
@@ -1475,6 +1597,7 @@ void main()
    CHECK(!invalid);
    CHECK(diagnostics[0]);
 
+   FreeVertexShader(shared_layout_vs);
    FreeVertexShader(rio_primitive_vs);
    FreeVertexShader(rio_mvp_vs);
    FreeVertexShader(rio_named_varying_vs);
@@ -1493,6 +1616,7 @@ void main()
    FreeVertexShader(nsmbu_attrib_color_vs);
    FreePixelShader(nsmbu_sampler_gap_ps);
    FreePixelShader(nsmbu_sampler_six_ps);
+   FreePixelShader(shared_layout_ps);
    FreePixelShader(rio_primitive_ps);
    FreePixelShader(rio_mix_ps);
    FreePixelShader(rio_light_ps);
