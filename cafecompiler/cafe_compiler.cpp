@@ -798,9 +798,9 @@ static bool BuildVertexSemanticMap(nir_shader *nir,
       }
    }
 
-   /* The attributes are named in order from zero over the ones the shader
-    * reads. The registers stay where they are; the semantic table carries the
-    * new name across to the fetch shader.
+   /* An attribute that names its own location keeps it. The rest are named
+    * from zero into whatever that leaves, in name order. The registers stay
+    * where they are; the semantic table carries the name to the fetch shader.
     */
    std::vector<nir_variable *> live;
    nir_foreach_variable_with_modes(variable, nir, nir_var_shader_in) {
@@ -814,12 +814,36 @@ static bool BuildVertexSemanticMap(nir_shader *nir,
       return strcmp(a->name, b->name) < 0;
    });
 
+   std::array<bool, 32> taken{};
+   for (const nir_variable *variable : live) {
+      if (!variable->data.explicit_location)
+         continue;
+
+      const unsigned location = variable->data.location - VERT_ATTRIB_GENERIC0;
+      attribute_locations[location] = static_cast<int>(location);
+      for (unsigned i = 0; i < slots[location]; ++i) {
+         semantics[location + i] = location + i;
+         taken[location + i] = true;
+      }
+   }
+
    unsigned name = 0;
    for (const nir_variable *variable : live) {
+      if (variable->data.explicit_location)
+         continue;
+
+      while (name < taken.size() && taken[name])
+         ++name;
+      if (name + slots[variable->data.location - VERT_ATTRIB_GENERIC0] > taken.size()) {
+         diagnostics = "Vertex attribute location exceeds Latte's 32 slots";
+         return false;
+      }
+
       const unsigned location = variable->data.location - VERT_ATTRIB_GENERIC0;
       attribute_locations[location] = static_cast<int>(name);
       for (unsigned i = 0; i < slots[location]; ++i) {
          semantics[location + i] = name + i;
+         taken[name + i] = true;
       }
       name += slots[location];
    }

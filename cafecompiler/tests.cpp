@@ -446,16 +446,16 @@ void main() {
    CHECK(vertex->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    CHECK(vertex->attribVarCount == 2);
    CHECK(vertex->regs.pa_cl_vs_out_cntl == 0);
-   /* A declared attribute still arrives in R(declared location + 1); the table
-    * carries the name it was given, and holds a hole for every location the
-    * shader does not declare. "offset" sorts before "position".
+   /* These name their own locations, so they keep them: an identity map with a
+    * hole for every location the shader does not declare, and an attribute at
+    * location N arriving in R(N + 1).
     */
    CHECK(vertex->regs.num_sq_vtx_semantic == 6);
-   CHECK(vertex->regs.sq_vtx_semantic[0] == 1);
+   CHECK(vertex->regs.sq_vtx_semantic[0] == 0);
    CHECK(vertex->regs.sq_vtx_semantic[1] == 0xff);
-   CHECK(vertex->regs.sq_vtx_semantic[5] == 0);
-   CHECK(FindAttribute(vertex->attribVars, vertex->attribVarCount, "offset") == 0);
-   CHECK(FindAttribute(vertex->attribVars, vertex->attribVarCount, "position") == 1);
+   CHECK(vertex->regs.sq_vtx_semantic[5] == 5);
+   CHECK(FindAttribute(vertex->attribVars, vertex->attribVarCount, "position") == 0);
+   CHECK(FindAttribute(vertex->attribVars, vertex->attribVarCount, "offset") == 5);
    CHECK((vertex->regs.spi_vs_out_id[0] & 0xff) == 0x8a);
    CHECK(FindUniformBlock(vertex->uniformBlocks,
                           vertex->uniformBlockCount,
@@ -574,11 +574,11 @@ void main() {
                        "head") == 0);
    CHECK(FindAttribute(dropped_attribute->attribVars,
                        dropped_attribute->attribVarCount,
-                       "tail") == 1);
+                       "tail") == 2);
    CHECK(dropped_attribute->regs.num_sq_vtx_semantic == 3);
    CHECK(dropped_attribute->regs.sq_vtx_semantic[0] == 0);
    CHECK(dropped_attribute->regs.sq_vtx_semantic[1] == 0xff);
-   CHECK(dropped_attribute->regs.sq_vtx_semantic[2] == 1);
+   CHECK(dropped_attribute->regs.sq_vtx_semantic[2] == 2);
    /* NUM_GPRS: R0 plus R1-R3 for locations 0-2. */
    CHECK((dropped_attribute->regs.sq_pgm_resources_vs & 0xff) >= 4);
 
@@ -1481,6 +1481,44 @@ void main()
                           kNsmbuColorAttribs[i]) == static_cast<int>(i));
    }
 
+   /* Mario Kart 8 writes the location it wants on every attribute and expects
+    * to keep it, so a declared location wins over the naming above. Where only
+    * some are declared, the rest take what is left.
+    */
+   GX2VertexShader *explicit_attrib_vs = CompileVertexShader(
+      "#version 330\n"
+      "layout(location = 0) in vec3 aPos;\n"
+      "layout(location = 1) in vec3 aNrm;\n"
+      "void main() { gl_Position = vec4(aPos + aNrm, 1.0); }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!explicit_attrib_vs) {
+      fprintf(stderr, "Declared attribute locations failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(FindAttribute(explicit_attrib_vs->attribVars,
+                       explicit_attrib_vs->attribVarCount, "aPos") == 0);
+   CHECK(FindAttribute(explicit_attrib_vs->attribVars,
+                       explicit_attrib_vs->attribVarCount, "aNrm") == 1);
+
+   GX2VertexShader *mixed_attrib_vs = CompileVertexShader(
+      "#version 330\n"
+      "layout(location = 1) in vec3 zPos;\n"
+      "in vec3 aNrm;\n"
+      "void main() { gl_Position = vec4(zPos + aNrm, 1.0); }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!mixed_attrib_vs) {
+      fprintf(stderr, "Mixed attribute locations failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(FindAttribute(mixed_attrib_vs->attribVars,
+                       mixed_attrib_vs->attribVarCount, "zPos") == 1);
+   CHECK(FindAttribute(mixed_attrib_vs->attribVars,
+                       mixed_attrib_vs->attribVarCount, "aNrm") == 0);
+
    /* Sampler units follow declaration order. */
    GX2PixelShader *nsmbu_sampler_gap_ps = CompilePixelShader(
       "#version 150\n"
@@ -1597,6 +1635,8 @@ void main()
    CHECK(!invalid);
    CHECK(diagnostics[0]);
 
+   FreeVertexShader(explicit_attrib_vs);
+   FreeVertexShader(mixed_attrib_vs);
    FreeVertexShader(shared_layout_vs);
    FreeVertexShader(rio_primitive_vs);
    FreeVertexShader(rio_mvp_vs);
