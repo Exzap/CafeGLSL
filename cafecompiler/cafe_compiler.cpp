@@ -41,6 +41,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -463,6 +464,11 @@ static int FindParameterOffset(const gl_program *program, unsigned uniform_index
    return -1;
 }
 
+static std::string_view UniformBaseName(const std::string &name)
+{
+   return std::string_view(name).substr(0, name.find('['));
+}
+
 /* GX2 sizes a block by its last member. */
 static uint32_t UniformBlockSize(const gl_uniform_block *block)
 {
@@ -582,18 +588,31 @@ static bool BuildReflection(gl_shader_program *shader_program,
 
       const unsigned uniform_index = static_cast<unsigned>(uniform - uniform_base);
       const uint32_t count = uniform->array_elements ? uniform->array_elements : 1;
+      int block = -1;
+      int offset = -1;
       if (uniform->block_index >= 0) {
          const unsigned block_index = static_cast<unsigned>(uniform->block_index);
          if (block_index < block_to_output.size() && block_to_output[block_index] >= 0) {
-            reflection.uniforms.push_back(
-               {name, gx2_type, count, static_cast<uint32_t>(uniform->offset),
-                block_to_output[block_index]});
+            block = block_to_output[block_index];
+            offset = static_cast<int>(uniform->offset);
          }
       } else {
-         const int offset = FindParameterOffset(program, uniform_index);
-         if (offset >= 0) {
+         offset = FindParameterOffset(program, uniform_index);
+      }
+      if (offset < 0)
+         continue;
+
+      reflection.uniforms.push_back(
+         {name, gx2_type, count, static_cast<uint32_t>(offset), block});
+
+      /* An array also gets a row per element, on a std140 stride. */
+      if (count > 1) {
+         const unsigned stride =
+            MAX2(16u, glsl_get_std140_size(glsl_without_array(uniform->type), false));
+         for (uint32_t element = 0; element < count; ++element) {
             reflection.uniforms.push_back(
-               {name, gx2_type, count, static_cast<uint32_t>(offset), -1});
+               {std::string(name) + "[" + std::to_string(element) + "]", gx2_type, count,
+                static_cast<uint32_t>(offset + element * stride), block});
          }
       }
    }
@@ -610,6 +629,14 @@ static bool BuildReflection(gl_shader_program *shader_program,
             uniform.block = loose_block;
       }
    }
+
+   /* The uniform table is listed by name, with an array's element rows kept
+    * behind the row they were expanded from.
+    */
+   std::stable_sort(reflection.uniforms.begin(), reflection.uniforms.end(),
+                    [](const UniformInfo &a, const UniformInfo &b) {
+                       return UniformBaseName(a.name) < UniformBaseName(b.name);
+                    });
 
    return true;
 }
