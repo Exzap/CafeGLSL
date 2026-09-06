@@ -485,6 +485,7 @@ static bool BuildReflection(gl_shader_program *shader_program,
                      gl_program *program,
                      mesa_shader_stage stage,
                      const std::unordered_map<std::string, unsigned> &sampler_bindings,
+                     const std::array<int, 32> &attribute_locations,
                      bool lower_loose_uniforms,
                      ReflectionInfo &reflection,
                      std::string &diagnostics)
@@ -551,11 +552,17 @@ static bool BuildReflection(gl_shader_program *shader_program,
                           "' cannot be represented by GX2";
             return false;
          }
+         /* An attribute the shader never reads is left out entirely. */
+         if (variable->location < 0 ||
+             static_cast<unsigned>(variable->location) >= attribute_locations.size() ||
+             attribute_locations[variable->location] < 0)
+            continue;
+
          /* GX2 counts a non-array attribute as 0. */
          reflection.attributes.push_back(
             {name, type, glsl_type_is_array(variable->type) ?
                          glsl_get_aoa_size(variable->type) : 0,
-             static_cast<uint32_t>(variable->location)});
+             static_cast<uint32_t>(attribute_locations[variable->location])});
          continue;
       }
 
@@ -630,13 +637,17 @@ static bool BuildReflection(gl_shader_program *shader_program,
       }
    }
 
-   /* The uniform table is listed by name, with an array's element rows kept
-    * behind the row they were expanded from.
+   /* Both tables are listed by name, the way the block table is. An array's
+    * element rows stay with the row they were expanded from.
     */
    std::stable_sort(reflection.uniforms.begin(), reflection.uniforms.end(),
                     [](const UniformInfo &a, const UniformInfo &b) {
                        return UniformBaseName(a.name) < UniformBaseName(b.name);
                     });
+   std::sort(reflection.attributes.begin(), reflection.attributes.end(),
+             [](const AttributeInfo &a, const AttributeInfo &b) {
+                return a.name < b.name;
+             });
 
    return true;
 }
@@ -746,9 +757,12 @@ static unsigned LatteSemantic(gl_varying_slot slot)
 
 static bool BuildVertexSemanticMap(nir_shader *nir,
                             std::array<unsigned, 32> &semantics,
+                            std::array<int, 32> &attribute_locations,
                             std::string &diagnostics)
 {
    semantics.fill(0xff);
+   attribute_locations.fill(-1);
+   std::array<unsigned, 32> slots{};
 
    /* GX2InitFetchShaderEx delivers an attribute to R(location + 1), and the SFN
     * backend puts input base N in R(N + 1), so the bases have to equal the declared
@@ -779,10 +793,35 @@ static bool BuildVertexSemanticMap(nir_shader *nir,
          }
 
          nir_intrinsic_set_base(load, location);
-         for (unsigned i = 0; i < io.num_slots; ++i)
-            semantics[location + i] = location + i;
+         slots[location] = MAX2(slots[location], io.num_slots);
          num_inputs = MAX2(num_inputs, static_cast<unsigned>(location) + io.num_slots);
       }
+   }
+
+   /* The attributes are named in order from zero over the ones the shader
+    * reads. The registers stay where they are; the semantic table carries the
+    * new name across to the fetch shader.
+    */
+   std::vector<nir_variable *> live;
+   nir_foreach_variable_with_modes(variable, nir, nir_var_shader_in) {
+      const int location = variable->data.location - VERT_ATTRIB_GENERIC0;
+      if (location >= 0 && static_cast<unsigned>(location) < slots.size() &&
+          slots[location]) {
+         live.push_back(variable);
+      }
+   }
+   std::sort(live.begin(), live.end(), [](const nir_variable *a, const nir_variable *b) {
+      return strcmp(a->name, b->name) < 0;
+   });
+
+   unsigned name = 0;
+   for (const nir_variable *variable : live) {
+      const unsigned location = variable->data.location - VERT_ATTRIB_GENERIC0;
+      attribute_locations[location] = static_cast<int>(name);
+      for (unsigned i = 0; i < slots[location]; ++i) {
+         semantics[location + i] = name + i;
+      }
+      name += slots[location];
    }
 
    /* Unused once the loads are lowered, but a re-lowering would read them. */
@@ -1028,6 +1067,7 @@ struct CafeCompiler::CompileState {
    bool uniform_registers = false;
    bool lower_loose_uniforms = false;
    std::array<unsigned, 32> vertex_semantics{};
+   std::array<int, 32> attribute_locations{};
    std::unordered_map<std::string, unsigned> sampler_bindings;
    ReflectionInfo reflection;
 
@@ -1206,7 +1246,8 @@ bool CafeCompiler::Compile(const char *source,
 bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
 {
    if (state.stage == MESA_SHADER_VERTEX &&
-       !BuildVertexSemanticMap(state.nir, state.vertex_semantics, diagnostics))
+       !BuildVertexSemanticMap(state.nir, state.vertex_semantics,
+                               state.attribute_locations, diagnostics))
       return false;
 
    const bool reserve_default_block = state.program->Parameters &&
@@ -1257,6 +1298,7 @@ bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
                         state.program,
                         state.stage,
                         state.sampler_bindings,
+                        state.attribute_locations,
                         state.lower_loose_uniforms,
                         state.reflection,
                         diagnostics))

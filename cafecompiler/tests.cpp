@@ -375,13 +375,16 @@ void main() {
    CHECK(vertex->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    CHECK(vertex->attribVarCount == 2);
    CHECK(vertex->regs.pa_cl_vs_out_cntl == 0);
-   /* Identity map, with a hole for every location the shader does not declare, so
-    * that an attribute at location N arrives in R(N + 1).
+   /* A declared attribute still arrives in R(declared location + 1); the table
+    * carries the name it was given, and holds a hole for every location the
+    * shader does not declare. "offset" sorts before "position".
     */
    CHECK(vertex->regs.num_sq_vtx_semantic == 6);
-   CHECK(vertex->regs.sq_vtx_semantic[0] == 0);
+   CHECK(vertex->regs.sq_vtx_semantic[0] == 1);
    CHECK(vertex->regs.sq_vtx_semantic[1] == 0xff);
-   CHECK(vertex->regs.sq_vtx_semantic[5] == 5);
+   CHECK(vertex->regs.sq_vtx_semantic[5] == 0);
+   CHECK(FindAttribute(vertex->attribVars, vertex->attribVarCount, "offset") == 0);
+   CHECK(FindAttribute(vertex->attribVars, vertex->attribVarCount, "position") == 1);
    CHECK((vertex->regs.spi_vs_out_id[0] & 0xff) == 0x8a);
    CHECK(FindUniformBlock(vertex->uniformBlocks,
                           vertex->uniformBlockCount,
@@ -480,8 +483,8 @@ void main() {
    CHECK(!sampler_aggregate);
    CHECK(strstr(diagnostics, "structures"));
 
-   /* An attribute that linking drops must not pull the ones behind it down a slot:
-    * the host still binds tail by its declared location, so it has to stay in R3.
+   /* An attribute that linking drops leaves its register alone: tail is named 1
+    * once unused is gone, but still arrives in R3.
     */
    GX2VertexShader *dropped_attribute = CompileVertexShader(
       "#version 450\n"
@@ -497,11 +500,14 @@ void main() {
    CHECK(dropped_attribute->attribVarCount == 2);
    CHECK(FindAttribute(dropped_attribute->attribVars,
                        dropped_attribute->attribVarCount,
-                       "tail") == 2);
+                       "head") == 0);
+   CHECK(FindAttribute(dropped_attribute->attribVars,
+                       dropped_attribute->attribVarCount,
+                       "tail") == 1);
    CHECK(dropped_attribute->regs.num_sq_vtx_semantic == 3);
    CHECK(dropped_attribute->regs.sq_vtx_semantic[0] == 0);
    CHECK(dropped_attribute->regs.sq_vtx_semantic[1] == 0xff);
-   CHECK(dropped_attribute->regs.sq_vtx_semantic[2] == 2);
+   CHECK(dropped_attribute->regs.sq_vtx_semantic[2] == 1);
    /* NUM_GPRS: R0 plus R1-R3 for locations 0-2. */
    CHECK((dropped_attribute->regs.sq_pgm_resources_vs & 0xff) >= 4);
 
@@ -752,18 +758,18 @@ void main()
    }
    CHECK(rio_primitive_vs->mode == GX2_SHADER_MODE_UNIFORM_REGISTER);
    CHECK(rio_primitive_vs->uniformBlockCount == 0);
-   /* No layout qualifiers, so these have to come out in declaration order. */
+   /* Declared Vertex, TexCoord0, ColorRate; named in the other order. */
    CHECK(rio_primitive_vs->attribVarCount == 3);
    CHECK(FindAttribute(rio_primitive_vs->attribVars,
-                       rio_primitive_vs->attribVarCount, "Vertex") == 0);
+                       rio_primitive_vs->attribVarCount, "ColorRate") == 0);
    CHECK(FindAttribute(rio_primitive_vs->attribVars,
                        rio_primitive_vs->attribVarCount, "TexCoord0") == 1);
    CHECK(FindAttribute(rio_primitive_vs->attribVars,
-                       rio_primitive_vs->attribVarCount, "ColorRate") == 2);
+                       rio_primitive_vs->attribVarCount, "Vertex") == 2);
    CHECK(rio_primitive_vs->regs.num_sq_vtx_semantic == 3);
-   CHECK(rio_primitive_vs->regs.sq_vtx_semantic[0] == 0);
+   CHECK(rio_primitive_vs->regs.sq_vtx_semantic[0] == 2);
    CHECK(rio_primitive_vs->regs.sq_vtx_semantic[1] == 1);
-   CHECK(rio_primitive_vs->regs.sq_vtx_semantic[2] == 2);
+   CHECK(rio_primitive_vs->regs.sq_vtx_semantic[2] == 0);
    /* rio::PrimitiveRenderer uploads these as raw vec4 runs, so they pack tightly. */
    const GX2UniformVar *rio_wvp = FindUniform(
       rio_primitive_vs->uniformVars, rio_primitive_vs->uniformVarCount, "wvp");
@@ -1198,11 +1204,13 @@ void main()
       "layout(std140) uniform MdlMtx { vec4 cMtxPalette[192]; };\n"
       "layout(std140) uniform Shp { int cWeightNum; };\n"
       NSMBU_MAT_BLOCK
-      "in ivec4 aBlendIndex;\n"
-      "in vec4 aBlendWeight;\n"
-      "in vec3 aNormal;\n"
       "in vec3 aPosition;\n"
+      "in vec3 aNormal;\n"
+      "in vec4 aBlendWeight;\n"
+      "in ivec4 aBlendIndex;\n"
       "in vec2 aTexCoord0;\n"
+      "in vec2 aTexCoord1;\n"
+      "in vec4 aColor0;\n"
       "void main() {\n"
       "   vec4 skinned = cMtxPalette[aBlendIndex.x] * aBlendWeight.x +\n"
       "                  cMtxPalette[aBlendIndex.y] * aBlendWeight.y;\n"
@@ -1277,7 +1285,10 @@ void main()
       CHECK(uniform->type == expected.type);
    }
 
-   /* Attribute locations follow declaration order. */
+   /* aTexCoord1 and aColor0 go unread, so they are left out and the rest are
+    * named from zero in name order.
+    */
+   CHECK(nsmbu_layout_vs->attribVarCount == 5);
    static const char *const kNsmbuAttribs[] = {
       "aBlendIndex", "aBlendWeight", "aNormal", "aPosition", "aTexCoord0",
    };
