@@ -102,12 +102,17 @@ _mesa_glsl_parse_state::_mesa_glsl_parse_state(struct gl_context *_ctx,
    this->compat_shader = true;
    this->es_shader = false;
    this->ARB_texture_rectangle_enable = true;
+   /* Cafe shaders ask for GLSL 3.30 and still call these. */
+   this->ARB_texture_gather_enable = true;
+   this->ARB_texture_query_lod_enable = true;
 
    /* OpenGL ES 2.0 has different defaults from desktop GL. */
    if (_mesa_is_gles2(ctx)) {
       this->language_version = 100;
       this->es_shader = true;
       this->ARB_texture_rectangle_enable = false;
+      this->ARB_texture_gather_enable = false;
+      this->ARB_texture_query_lod_enable = false;
    }
 
    this->extensions = &ctx->Extensions;
@@ -505,6 +510,8 @@ _mesa_glsl_parse_state::process_version_directive(YYLTYPE *locp, int version,
 
    if (this->es_shader) {
       this->ARB_texture_rectangle_enable = false;
+      this->ARB_texture_gather_enable = false;
+      this->ARB_texture_query_lod_enable = false;
    }
 
    if (this->forced_language_version)

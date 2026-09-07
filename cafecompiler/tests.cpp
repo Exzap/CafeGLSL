@@ -1627,6 +1627,27 @@ void main()
    CHECK(FindSampler(shared_layout_ps->samplerVars,
                      shared_layout_ps->samplerVarCount, "texMap") == 0);
 
+   /* Filters that ask for GLSL 3.30 and reach past it anyway, with no
+    * #extension line of their own.
+    */
+   GX2PixelShader *gather_ps = CompilePixelShader(
+      "#version 330\n"
+      "uniform sampler2D texMap;\n"
+      "in vec4 vTexCoord;\n"
+      "out vec4 oColor;\n"
+      "void main() {\n"
+      "   oColor = textureGather(texMap, vTexCoord.xy) +\n"
+      "            textureGatherOffset(texMap, vTexCoord.xy, ivec2(1, 1)) +\n"
+      "            vec4(textureQueryLod(texMap, vTexCoord.xy), 0.0, 0.0);\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!gather_ps) {
+      fprintf(stderr, "Gather pixel shader failed: %s\n", diagnostics);
+      return 1;
+   }
+
    GX2PixelShader *invalid = CompilePixelShader(
       "#version 450\nthis is invalid;",
       diagnostics,
@@ -1657,6 +1678,7 @@ void main()
    FreePixelShader(nsmbu_sampler_gap_ps);
    FreePixelShader(nsmbu_sampler_six_ps);
    FreePixelShader(shared_layout_ps);
+   FreePixelShader(gather_ps);
    FreePixelShader(rio_primitive_ps);
    FreePixelShader(rio_mix_ps);
    FreePixelShader(rio_light_ps);

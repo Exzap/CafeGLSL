@@ -577,6 +577,12 @@ texture_query_lod(const _mesa_glsl_parse_state *state)
 }
 
 static bool
+v400_or_texture_query_lod(const _mesa_glsl_parse_state *state)
+{
+   return v400_derivatives_only(state) || texture_query_lod(state);
+}
+
+static bool
 texture_gather_cube_map_array(const _mesa_glsl_parse_state *state)
 {
    return state->is_version(400, 320) ||
@@ -3938,40 +3944,40 @@ builtin_builder::create_builtins()
                 NULL);
 
    add_function("textureQueryLod",
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler1D,  &glsl_type_builtin_float),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_isampler1D, &glsl_type_builtin_float),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_usampler1D, &glsl_type_builtin_float),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler1D,  &glsl_type_builtin_float),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_isampler1D, &glsl_type_builtin_float),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_usampler1D, &glsl_type_builtin_float),
 
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler2D,  &glsl_type_builtin_vec2),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_isampler2D, &glsl_type_builtin_vec2),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_usampler2D, &glsl_type_builtin_vec2),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler2D,  &glsl_type_builtin_vec2),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_isampler2D, &glsl_type_builtin_vec2),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_usampler2D, &glsl_type_builtin_vec2),
 
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler3D,  &glsl_type_builtin_vec3),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_isampler3D, &glsl_type_builtin_vec3),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_usampler3D, &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler3D,  &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_isampler3D, &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_usampler3D, &glsl_type_builtin_vec3),
 
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_samplerCube,  &glsl_type_builtin_vec3),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_isamplerCube, &glsl_type_builtin_vec3),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_usamplerCube, &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_samplerCube,  &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_isamplerCube, &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_usamplerCube, &glsl_type_builtin_vec3),
 
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler1DArray,  &glsl_type_builtin_float),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_isampler1DArray, &glsl_type_builtin_float),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_usampler1DArray, &glsl_type_builtin_float),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler1DArray,  &glsl_type_builtin_float),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_isampler1DArray, &glsl_type_builtin_float),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_usampler1DArray, &glsl_type_builtin_float),
 
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler2DArray,  &glsl_type_builtin_vec2),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_isampler2DArray, &glsl_type_builtin_vec2),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_usampler2DArray, &glsl_type_builtin_vec2),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler2DArray,  &glsl_type_builtin_vec2),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_isampler2DArray, &glsl_type_builtin_vec2),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_usampler2DArray, &glsl_type_builtin_vec2),
 
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_samplerCubeArray,  &glsl_type_builtin_vec3),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_isamplerCubeArray, &glsl_type_builtin_vec3),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_usamplerCubeArray, &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_samplerCubeArray,  &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_isamplerCubeArray, &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_usamplerCubeArray, &glsl_type_builtin_vec3),
 
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler1DShadow, &glsl_type_builtin_float),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler2DShadow, &glsl_type_builtin_vec2),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_samplerCubeShadow, &glsl_type_builtin_vec3),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler1DArrayShadow, &glsl_type_builtin_float),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_sampler2DArrayShadow, &glsl_type_builtin_vec2),
-                _textureQueryLod(v400_derivatives_only, &glsl_type_builtin_samplerCubeArrayShadow, &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler1DShadow, &glsl_type_builtin_float),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler2DShadow, &glsl_type_builtin_vec2),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_samplerCubeShadow, &glsl_type_builtin_vec3),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler1DArrayShadow, &glsl_type_builtin_float),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_sampler2DArrayShadow, &glsl_type_builtin_vec2),
+                _textureQueryLod(v400_or_texture_query_lod, &glsl_type_builtin_samplerCubeArrayShadow, &glsl_type_builtin_vec3),
                 NULL);
 
    add_function("textureQueryLevels",
@@ -4493,13 +4499,13 @@ builtin_builder::create_builtins()
                 NULL);
 
    add_function("textureGatherOffset",
-                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_vec4, &glsl_type_builtin_sampler2D, &glsl_type_builtin_vec2, TEX_OFFSET),
-                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_ivec4, &glsl_type_builtin_isampler2D, &glsl_type_builtin_vec2, TEX_OFFSET),
-                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_uvec4, &glsl_type_builtin_usampler2D, &glsl_type_builtin_vec2, TEX_OFFSET),
+                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_vec4, &glsl_type_builtin_sampler2D, &glsl_type_builtin_vec2, TEX_OFFSET_NONCONST),
+                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_ivec4, &glsl_type_builtin_isampler2D, &glsl_type_builtin_vec2, TEX_OFFSET_NONCONST),
+                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_uvec4, &glsl_type_builtin_usampler2D, &glsl_type_builtin_vec2, TEX_OFFSET_NONCONST),
 
-                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_vec4, &glsl_type_builtin_sampler2DArray, &glsl_type_builtin_vec3, TEX_OFFSET),
-                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_ivec4, &glsl_type_builtin_isampler2DArray, &glsl_type_builtin_vec3, TEX_OFFSET),
-                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_uvec4, &glsl_type_builtin_usampler2DArray, &glsl_type_builtin_vec3, TEX_OFFSET),
+                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_vec4, &glsl_type_builtin_sampler2DArray, &glsl_type_builtin_vec3, TEX_OFFSET_NONCONST),
+                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_ivec4, &glsl_type_builtin_isampler2DArray, &glsl_type_builtin_vec3, TEX_OFFSET_NONCONST),
+                _texture(ir_tg4, texture_gather_only_or_es31, &glsl_type_builtin_uvec4, &glsl_type_builtin_usampler2DArray, &glsl_type_builtin_vec3, TEX_OFFSET_NONCONST),
 
                 _texture(ir_tg4, es31_not_gs5, &glsl_type_builtin_vec4, &glsl_type_builtin_sampler2D, &glsl_type_builtin_vec2, TEX_OFFSET | TEX_COMPONENT),
                 _texture(ir_tg4, es31_not_gs5, &glsl_type_builtin_ivec4, &glsl_type_builtin_isampler2D, &glsl_type_builtin_vec2, TEX_OFFSET | TEX_COMPONENT),
