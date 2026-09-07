@@ -378,7 +378,10 @@ PATH			["][]^./ _A-Za-z0-9+*%[(){}|&~=!:;,?-]*["]
 	}
 }
 
-<HASH>else {
+	/* Punctuation trailing these two is ignored, so long as the directive
+	 * name itself still ends. Stopping at a '/' leaves any comment to the
+	 * comment rules, which know how to carry one past the line. */
+<HASH>else([ \t]*[^_a-zA-Z0-9 \t\r\n/][^\r\n/]*)? {
 	if (!yyextra->in_define) {
 		BEGIN INITIAL;
 		yyextra->space_tokens = 0;
@@ -386,7 +389,7 @@ PATH			["][]^./ _A-Za-z0-9+*%[(){}|&~=!:;,?-]*["]
 	}
 }
 
-<HASH>endif {
+<HASH>endif([ \t]*[^_a-zA-Z0-9 \t\r\n/][^\r\n/]*)? {
 	if (!yyextra->in_define) {
 		BEGIN INITIAL;
 		yyextra->space_tokens = 0;
