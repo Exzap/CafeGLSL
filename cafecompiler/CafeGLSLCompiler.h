@@ -17,6 +17,12 @@ typedef enum GLSL_COMPILER_FLAG {
    /* Legacy alias for GLSL_COMPILER_FLAG_PRINT_DISASSEMBLY_TO_STDERR. */
    GLSL_COMPILER_FLAG_GENERATE_DISASSEMBLY = 1 << 0,
    GLSL_COMPILER_FLAG_PRINT_DISASSEMBLY_TO_STDERR = 1 << 0,
+   /* Allow loose uniforms to be moved into an implicit uniform block when the
+    * shader also uses uniform blocks or exceeds the loose uniform limit.
+    * This changes the GX2 uniform upload ABI to GX2Set*UniformBlock.
+    * Read the included README.md in the release zip for more info.
+    */
+   GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK = 1 << 1,
 } GLSL_COMPILER_FLAG;
 
 void InitGLSLCompiler(void);

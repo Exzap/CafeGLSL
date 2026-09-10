@@ -1056,17 +1056,19 @@ static void RemapLatteResources(r600_bytecode &bytecode)
    }
 }
 
-static std::string DefaultUniformBlockWarning(mesa_shader_stage stage)
+static std::string UniformBlockFallbackError(mesa_shader_stage stage,
+                                             bool exceeds_register_limit)
 {
    const std::string setter = stage == MESA_SHADER_VERTEX ? "Vertex" : "Pixel";
-   return std::string(
-             "warning: shader mixes non-block uniforms with uniform blocks, which Latte "
-             "cannot do in a single shader mode: GX2 selects one file or the other, and "
-             "whichever one the mode leaves out reads back as zero. The non-block "
-             "uniforms were moved into uniform block '") +
-          kDefaultUniformBlockName + "' at location " +
-          std::to_string(kDefaultUniformBlockBinding) + "; upload them with GX2Set" +
-          setter + "UniformBlock instead of GX2Set" + setter + "UniformReg.";
+   const std::string reason = exceeds_register_limit ?
+      "Non-block uniforms exceed Latte's 1024-component ALU constant file" :
+      "Shader mixes non-block uniforms with uniform blocks, which Latte cannot access "
+      "in a single shader mode";
+   return reason + ". Pass GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK "
+          "(CLI: --allow-uniform-block-fallback) to move them into uniform block '" +
+          kDefaultUniformBlockName + "' at binding " +
+          std::to_string(kDefaultUniformBlockBinding) + " and upload them with GX2Set" +
+          setter + "UniformBlock instead of GX2Set" + setter + "UniformReg";
 }
 
 static unsigned FragmentColorBufferCount(const nir_shader *nir)
@@ -1218,7 +1220,8 @@ bool CafeCompiler::InitializeContext()
 bool CafeCompiler::Compile(const char *source,
                            unsigned shader_type,
                            CompileState &state,
-                           std::string &diagnostics)
+                           std::string &diagnostics,
+                           GLSL_COMPILER_FLAG flags)
 {
    if (!source) {
       diagnostics = "Shader source is null";
@@ -1259,7 +1262,7 @@ bool CafeCompiler::Compile(const char *source,
    nir_shader_gather_info(state.nir, nir_shader_get_entrypoint(state.nir));
    nir_build_program_resource_list(&m_ctx->Const, state.shader_program, false);
 
-   if (!PrepareNir(state, diagnostics))
+   if (!PrepareNir(state, diagnostics, flags))
       return false;
    if (!CompileR600(state, diagnostics))
       return false;
@@ -1267,7 +1270,9 @@ bool CafeCompiler::Compile(const char *source,
    return true;
 }
 
-bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
+bool CafeCompiler::PrepareNir(CompileState &state,
+                              std::string &diagnostics,
+                              GLSL_COMPILER_FLAG flags)
 {
    if (state.stage == MESA_SHADER_VERTEX &&
        !BuildVertexSemanticMap(state.nir, state.vertex_semantics,
@@ -1299,13 +1304,20 @@ bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
    /* GX2 selects one constant file per shader; the other reads back as zero. */
    const unsigned loose_components = state.program->Parameters ?
       state.program->Parameters->NumParameterValues : 0;
-   state.lower_loose_uniforms = loose_components != 0 && !state.ubo_bindings.empty();
-   state.uniform_registers = loose_components != 0 && !state.lower_loose_uniforms;
+   const bool mixes_uniform_modes = loose_components != 0 && !state.ubo_bindings.empty();
+   const bool exceeds_register_limit = loose_components > kMaxAluConstComponents;
+   const bool needs_uniform_block_fallback =
+      mixes_uniform_modes || exceeds_register_limit;
+   const bool allow_uniform_block_fallback =
+      flags & GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK;
 
-   if (state.uniform_registers && loose_components > kMaxAluConstComponents) {
-      diagnostics = "Non-block uniforms exceed Latte's 1024-component ALU constant file";
+   if (needs_uniform_block_fallback && !allow_uniform_block_fallback) {
+      diagnostics = UniformBlockFallbackError(state.stage, exceeds_register_limit);
       return false;
    }
+
+   state.lower_loose_uniforms = needs_uniform_block_fallback;
+   state.uniform_registers = loose_components != 0 && !state.lower_loose_uniforms;
 
    if (state.lower_loose_uniforms) {
       if (std::find(state.ubo_bindings.begin(),
@@ -1315,7 +1327,6 @@ bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
                        "shaders that also use uniform blocks";
          return false;
       }
-      diagnostics = DefaultUniformBlockWarning(state.stage);
    }
 
    if (!BuildReflection(state.shader_program,
@@ -1390,7 +1401,7 @@ GX2VertexShader *CafeCompiler::CompileVertexShader(const char *source,
                                                   GLSL_COMPILER_FLAG flags)
 {
    CompileState state;
-   if (!Compile(source, GL_VERTEX_SHADER, state, diagnostics))
+   if (!Compile(source, GL_VERTEX_SHADER, state, diagnostics, flags))
       return nullptr;
 
    std::unique_ptr<GX2VertexShader, decltype(&FreeVertexShader)> output(
@@ -1421,7 +1432,7 @@ GX2PixelShader *CafeCompiler::CompilePixelShader(const char *source,
                                                 GLSL_COMPILER_FLAG flags)
 {
    CompileState state;
-   if (!Compile(source, GL_FRAGMENT_SHADER, state, diagnostics))
+   if (!Compile(source, GL_FRAGMENT_SHADER, state, diagnostics, flags))
       return nullptr;
 
    std::unique_ptr<GX2PixelShader, decltype(&FreePixelShader)> output(

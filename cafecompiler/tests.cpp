@@ -464,16 +464,22 @@ void main() {
       vertex->uniformVars, vertex->uniformVarCount, "scale");
    CHECK(scale && scale->offset == 4);
 
+   CHECK(!CompilePixelShader(
+      pixel_source, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE));
+   CHECK(strstr(diagnostics, "GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK"));
+
    GX2PixelShader *pixel = CompilePixelShader(
-      pixel_source, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE);
+      pixel_source,
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
    if (!pixel) {
       fprintf(stderr, "Pixel compilation failed: %s\n", diagnostics);
       return 1;
    }
    CHECK(pixel->program && pixel->size);
    CHECK(pixel->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
-   CHECK(strstr(diagnostics, "warning:") &&
-         strstr(diagnostics, "GX2SetPixelUniformBlock"));
+   CHECK(!diagnostics[0]);
    CHECK((pixel->regs.spi_ps_input_cntls[0] & 0xff) == 0x8a);
    CHECK(FindUniformBlock(pixel->uniformBlocks,
                           pixel->uniformBlockCount,
@@ -599,7 +605,8 @@ void main() {
     * mode translates both kinds; a relative constant-file read forces FULL_CFILE,
     * where every constant source is emitted as a uniform register and the kcache reads
     * silently come out wrong. So a shader that mixes loose uniforms with a uniform
-    * block has to put the loose ones in a block too.
+    * block has to put the loose ones in a block too. That changes the upload ABI, so
+    * callers must opt in.
     */
    GX2VertexShader *indexed_loose_with_block = CompileVertexShader(
       "#version 450\n"
@@ -608,7 +615,7 @@ void main() {
       "void main() { gl_Position = positions[gl_VertexID & 3] * scale; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_NONE);
+      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
    CHECK(indexed_loose_with_block);
    CHECK(!(ReadsAluConstFile(indexed_loose_with_block->program,
                              indexed_loose_with_block->size) &&
@@ -623,7 +630,7 @@ void main() {
       "void main() { gl_Position = positions[gl_VertexID & 3] * scale * tint; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_NONE);
+      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
    CHECK(loose_pair_with_block);
    CHECK(!(ReadsAluConstFile(loose_pair_with_block->program,
                              loose_pair_with_block->size) &&
@@ -637,7 +644,7 @@ void main() {
       "void main() { gl_Position = position + offset; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_NONE);
+      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
    CHECK(mixed_uniforms);
    CHECK(mixed_uniforms->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    CHECK(mixed_uniforms->uniformBlockCount == 2);
@@ -650,8 +657,7 @@ void main() {
    CHECK(HasKcacheBank(mixed_uniforms->program, mixed_uniforms->size, 0));
    CHECK(HasKcacheBank(mixed_uniforms->program, mixed_uniforms->size, 15));
    CHECK(!ReadsAluConstFile(mixed_uniforms->program, mixed_uniforms->size));
-   CHECK(strstr(diagnostics, "warning:"));
-   CHECK(strstr(diagnostics, "GX2SetVertexUniformBlock"));
+   CHECK(!diagnostics[0]);
 
    /* Only mixed shaders lose binding 0. */
    CHECK(!CompileVertexShader(
@@ -661,10 +667,10 @@ void main() {
       "void main() { gl_Position = scale + offset; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_NONE));
+      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK));
    CHECK(strstr(diagnostics, "binding 0 is reserved"));
 
-   /* Deliberately an error rather than a silent move into a block. */
+   /* Oversized register uniforms are also an ABI-changing fallback. */
    CHECK(!CompileVertexShader(
       "#version 450\n"
       "uniform vec4 positions[300];\n"
@@ -673,8 +679,25 @@ void main() {
       sizeof(diagnostics),
       GLSL_COMPILER_FLAG_NONE));
    CHECK(strstr(diagnostics, "ALU constant file"));
+   CHECK(strstr(diagnostics, "GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK"));
 
-   /* The same array is fine once a block has forced everything into the kcache. */
+   GX2VertexShader *oversized_loose = CompileVertexShader(
+      "#version 450\n"
+      "uniform vec4 positions[300];\n"
+      "void main() { gl_Position = positions[gl_VertexID & 255]; }\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
+   CHECK(oversized_loose);
+   CHECK(oversized_loose->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
+   CHECK(oversized_loose->uniformBlockCount == 1);
+   CHECK(FindUniformBlock(oversized_loose->uniformBlocks,
+                          oversized_loose->uniformBlockCount,
+                          "__cafe_loose_uniforms") == 0);
+   CHECK(oversized_loose->uniformBlocks[0].size == 300 * 16);
+   CHECK(!diagnostics[0]);
+
+   /* The same fallback also works when another block already selected the kcache. */
    GX2VertexShader *oversized_mixed = CompileVertexShader(
       "#version 450\n"
       "layout(binding = 7, std140) uniform Data { vec4 scale; };\n"
@@ -682,7 +705,7 @@ void main() {
       "void main() { gl_Position = positions[gl_VertexID & 255] * scale; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_NONE);
+      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
    CHECK(oversized_mixed);
    CHECK(oversized_mixed->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    CHECK(FindUniformBlock(oversized_mixed->uniformBlocks,
@@ -1690,6 +1713,7 @@ void main()
    FreeVertexShader(indexed_loose_with_block);
    FreeVertexShader(loose_pair_with_block);
    FreeVertexShader(mixed_uniforms);
+   FreeVertexShader(oversized_loose);
    FreeVertexShader(oversized_mixed);
    FreePixelShader(pixel);
    FreePixelShader(environment_pass);

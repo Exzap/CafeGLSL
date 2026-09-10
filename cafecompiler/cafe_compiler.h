@@ -39,8 +39,11 @@ private:
    bool Compile(const char *source,
                 unsigned shader_type,
                 CompileState &state,
-                std::string &diagnostics);
-   bool PrepareNir(CompileState &state, std::string &diagnostics);
+                std::string &diagnostics,
+                GLSL_COMPILER_FLAG flags);
+   bool PrepareNir(CompileState &state,
+                   std::string &diagnostics,
+                   GLSL_COMPILER_FLAG flags);
    bool CompileR600(CompileState &state, std::string &diagnostics);
 
    gl_context *m_ctx = nullptr;

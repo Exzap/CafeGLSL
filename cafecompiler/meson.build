@@ -102,4 +102,10 @@ if host_machine.system() != 'cafeos'
     cafeglsl_cli,
     args : ['-vs'] + files('testdata/nsmbu-uber.vert'),
   )
+
+  test(
+    'cafeglsl-uniform-block-fallback-enabled',
+    cafeglsl_cli,
+    args : ['--allow-uniform-block-fallback', '-ps'] + files('testdata/basic.frag'),
+  )
 endif
