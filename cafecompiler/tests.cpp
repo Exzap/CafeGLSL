@@ -18,6 +18,7 @@ constexpr uint32_t kCfVtx = 2;
 constexpr uint32_t kCfVtxTc = 3;
 constexpr uint32_t kCfAlu = 8;
 constexpr uint32_t kVFetch = 0;
+constexpr uint32_t kDbShaderControlKillEnable = 1u << 6;
 
 static int FindUniformBlockIndex(const GX2UniformBlock *blocks,
                                  uint32_t count,
@@ -1671,6 +1672,25 @@ void main()
       return 1;
    }
 
+   /* Cafe consumes gl_FragCoord directly. The wpos lowering pass must not add
+    * the desktop-only gl_FbWposYTransform state uniform to the GX2 ABI. */
+   GX2PixelShader *fragcoord_ps = CompilePixelShader(
+      "#version 330\n"
+      "out vec4 oColor;\n"
+      "void main() {\n"
+      "   oColor = vec4(gl_FragCoord.xy * 0.001, 0.0, 1.0);\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!fragcoord_ps) {
+      fprintf(stderr, "gl_FragCoord pixel shader failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK(fragcoord_ps->uniformBlockCount == 0);
+   CHECK(fragcoord_ps->uniformVarCount == 0);
+   CHECK((fragcoord_ps->regs.db_shader_control & kDbShaderControlKillEnable) == 0);
+
    GX2PixelShader *invalid = CompilePixelShader(
       "#version 450\nthis is invalid;",
       diagnostics,
@@ -1702,6 +1722,7 @@ void main()
    FreePixelShader(nsmbu_sampler_six_ps);
    FreePixelShader(shared_layout_ps);
    FreePixelShader(gather_ps);
+   FreePixelShader(fragcoord_ps);
    FreePixelShader(rio_primitive_ps);
    FreePixelShader(rio_mix_ps);
    FreePixelShader(rio_light_ps);
