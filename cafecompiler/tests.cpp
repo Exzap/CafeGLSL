@@ -19,6 +19,7 @@ constexpr uint32_t kCfVtxTc = 3;
 constexpr uint32_t kCfAlu = 8;
 constexpr uint32_t kVFetch = 0;
 constexpr uint32_t kDbShaderControlKillEnable = 1u << 6;
+constexpr uint32_t kAluKillgt = 0x2d;
 
 static int FindUniformBlockIndex(const GX2UniformBlock *blocks,
                                  uint32_t count,
@@ -243,6 +244,31 @@ static bool HasAluConstSource(const void *program,
                    (!relative || relatives[source]))
                   return true;
             }
+         }
+      }
+      if (!is_alu && (cf_word1 & (1u << 21)))
+         break;
+   }
+   return false;
+}
+
+static bool HasAluOpcode(const void *program, uint32_t size, uint32_t opcode)
+{
+   const auto *words = static_cast<const uint32_t *>(program);
+   const uint32_t word_count = size / sizeof(uint32_t);
+   for (uint32_t i = 0; i + 1 < word_count; i += 2) {
+      const uint32_t cf_word0 = words[i];
+      const uint32_t cf_word1 = words[i + 1];
+      const bool is_alu = ((cf_word1 >> 26) & 0xf) >= kCfAlu;
+      if (is_alu) {
+         const uint32_t count = ((cf_word1 >> 18) & 0x7f) + 1;
+         const uint32_t clause_start = (cf_word0 & 0x3fffff) * 2;
+         for (uint32_t instruction = 0; instruction < count; ++instruction) {
+            const uint32_t alu_word = clause_start + instruction * 2;
+            if (alu_word + 1 >= word_count)
+               break;
+            if (((words[alu_word + 1] >> 7) & 0x7ff) == opcode)
+               return true;
          }
       }
       if (!is_alu && (cf_word1 & (1u << 21)))
@@ -1691,6 +1717,26 @@ void main()
    CHECK(fragcoord_ps->uniformVarCount == 0);
    CHECK((fragcoord_ps->regs.db_shader_control & kDbShaderControlKillEnable) == 0);
 
+   /* A dynamic discard must reach the R600 kill path and enable the
+    * corresponding pixel-stage hardware control bit. */
+   GX2PixelShader *discard_ps = CompilePixelShader(
+      "#version 450\n"
+      "layout(location = 0) in float alpha;\n"
+      "layout(location = 0) out vec4 oColor;\n"
+      "void main() {\n"
+      "   if (alpha < 0.5) discard;\n"
+      "   oColor = vec4(1.0);\n"
+      "}\n",
+      diagnostics,
+      sizeof(diagnostics),
+      GLSL_COMPILER_FLAG_NONE);
+   if (!discard_ps) {
+      fprintf(stderr, "discard pixel shader failed: %s\n", diagnostics);
+      return 1;
+   }
+   CHECK((discard_ps->regs.db_shader_control & kDbShaderControlKillEnable) != 0);
+   CHECK(HasAluOpcode(discard_ps->program, discard_ps->size, kAluKillgt));
+
    GX2PixelShader *invalid = CompilePixelShader(
       "#version 450\nthis is invalid;",
       diagnostics,
@@ -1723,6 +1769,7 @@ void main()
    FreePixelShader(shared_layout_ps);
    FreePixelShader(gather_ps);
    FreePixelShader(fragcoord_ps);
+   FreePixelShader(discard_ps);
    FreePixelShader(rio_primitive_ps);
    FreePixelShader(rio_mix_ps);
    FreePixelShader(rio_light_ps);
