@@ -25,26 +25,35 @@ public:
    bool valid() const { return m_valid; }
    const std::string &initialization_error() const { return m_initialization_error; }
 
-   GX2VertexShader *CompileVertexShader(const char *source,
-                                       std::string &diagnostics,
-                                       GLSL_COMPILER_FLAG flags);
-   GX2PixelShader *CompilePixelShader(const char *source,
-                                     std::string &diagnostics,
-                                     GLSL_COMPILER_FLAG flags);
+   GX2ShaderMode CompileVertexShader(const char *source, GLSLCompileMode requested_mode,
+                                           GX2VertexShader *&shader_output, std::string &diagnostics,
+                                           GLSL_COMPILER_FLAG flags);
+   GX2ShaderMode CompilePixelShader(const char *source, GLSLCompileMode requested_mode,
+                                          GX2PixelShader *&shader_output, std::string &diagnostics,
+                                          GLSL_COMPILER_FLAG flags);
+   GX2ShaderMode CompileShaderPair(const char *vertex_source, const char *pixel_source,
+                                         GLSLCompileMode requested_mode, GX2VertexShader *&vertex_output,
+                                         GX2PixelShader *&pixel_output,
+                                         std::string &diagnostics, GLSL_COMPILER_FLAG flags);
 
 private:
    struct CompileState;
 
    bool InitializeContext();
-   bool Compile(const char *source,
-                unsigned shader_type,
-                CompileState &state,
-                std::string &diagnostics,
-                GLSL_COMPILER_FLAG flags);
-   bool PrepareNir(CompileState &state,
-                   std::string &diagnostics,
-                   GLSL_COMPILER_FLAG flags);
+   bool CompileFrontend(const char *source,
+                         unsigned shader_type,
+                         CompileState &state,
+                         std::string &diagnostics);
+   bool SelectMode(GLSLCompileMode requested_mode, CompileState &first,
+                   CompileState *second, std::string &diagnostics);
+   bool PrepareNir(CompileState &state, std::string &diagnostics);
    bool CompileR600(CompileState &state, std::string &diagnostics);
+   GX2VertexShader *CreateVertexShader(CompileState &state,
+                                       std::string &diagnostics,
+                                       GLSL_COMPILER_FLAG flags);
+   GX2PixelShader *CreatePixelShader(CompileState &state,
+                                     std::string &diagnostics,
+                                     GLSL_COMPILER_FLAG flags);
 
    gl_context *m_ctx = nullptr;
    nir_shader_compiler_options *m_nir_options = nullptr;

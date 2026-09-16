@@ -17,28 +17,45 @@ typedef enum GLSL_COMPILER_FLAG {
    /* Legacy alias for GLSL_COMPILER_FLAG_PRINT_DISASSEMBLY_TO_STDERR. */
    GLSL_COMPILER_FLAG_GENERATE_DISASSEMBLY = 1 << 0,
    GLSL_COMPILER_FLAG_PRINT_DISASSEMBLY_TO_STDERR = 1 << 0,
-   /* Allow loose uniforms to be moved into an implicit uniform block when the
-    * shader also uses uniform blocks or exceeds the loose uniform limit.
-    * This changes the GX2 uniform upload ABI to GX2Set*UniformBlock.
-    * Read the included README.md in the release zip for more info.
-    */
-   GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK = 1 << 1,
 } GLSL_COMPILER_FLAG;
 
+typedef enum GLSLCompileMode {
+   /* Use uniform registers when possible, blocks when needed. */
+   GLSL_COMPILE_AUTO = 0,
+   /* Fail if uniform blocks are needed. */
+   GLSL_COMPILE_REGISTER = 1,
+   /* Use uniform blocks, moving loose uniforms into a block. */
+   GLSL_COMPILE_BLOCK = 2,
+} GLSLCompileMode;
+
+#define GLSL_SHADER_MODE_ERROR ((GX2ShaderMode)-1)
+
+/* Initialize before compiling. Destroy when done. */
 void InitGLSLCompiler(void);
 void DestroyGLSLCompiler(void);
 const char *GetGLSLCompilerVersion(void);
 
-GX2VertexShader *CompileVertexShader(const char *shaderSource,
-                                    char *infoLogOut,
-                                    int infoLogMaxLength,
-                                    GLSL_COMPILER_FLAG flags);
-GX2PixelShader *CompilePixelShader(const char *shaderSource,
-                                  char *infoLogOut,
-                                  int infoLogMaxLength,
-                                  GLSL_COMPILER_FLAG flags);
+/* Return the mode for GX2SetShaderMode(), or GLSL_SHADER_MODE_ERROR on failure.
+ * On failure, shader pointers are set to null and infoLogOut contains the error.
+ * See the README's "Important: choose loose uniforms or uniform blocks" chapter. */
+GX2ShaderMode CompileVertexShader(const char *source, GLSLCompileMode requestedMode,
+                                        GX2VertexShader **shaderOut, char *infoLogOut,
+                                        int infoLogMaxLength, GLSL_COMPILER_FLAG flags);
+GX2ShaderMode CompilePixelShader(const char *source, GLSLCompileMode requestedMode,
+                                       GX2PixelShader **shaderOut, char *infoLogOut,
+                                       int infoLogMaxLength, GLSL_COMPILER_FLAG flags);
+/* Compile a pair with a shared uniform mode. Both sources are required.
+ * Matching vertex outputs to pixel inputs is not checked. */
+GX2ShaderMode CompileShaderPair(const char *vertexSource, const char *pixelSource,
+                                      GLSLCompileMode requestedMode,
+                                      GX2VertexShader **vertexOut, GX2PixelShader **pixelOut,
+                                      char *infoLogOut, int infoLogMaxLength,
+                                      GLSL_COMPILER_FLAG flags);
+
+/* Free shaders when done. Null shaders are accepted. */
 void FreeVertexShader(GX2VertexShader *shader);
 void FreePixelShader(GX2PixelShader *shader);
+void FreeShaders(GX2VertexShader *vertex, GX2PixelShader *pixel);
 
 #ifdef __cplusplus
 }

@@ -6,5 +6,7 @@ DestroyGLSLCompiler
 GetGLSLCompilerVersion
 CompileVertexShader
 CompilePixelShader
+CompileShaderPair
 FreeVertexShader
 FreePixelShader
+FreeShaders

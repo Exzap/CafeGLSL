@@ -1056,21 +1056,6 @@ static void RemapLatteResources(r600_bytecode &bytecode)
    }
 }
 
-static std::string UniformBlockFallbackError(mesa_shader_stage stage,
-                                             bool exceeds_register_limit)
-{
-   const std::string setter = stage == MESA_SHADER_VERTEX ? "Vertex" : "Pixel";
-   const std::string reason = exceeds_register_limit ?
-      "Non-block uniforms exceed Latte's 1024-component ALU constant file" :
-      "Shader mixes non-block uniforms with uniform blocks, which Latte cannot access "
-      "in a single shader mode";
-   return reason + ". Pass GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK "
-          "(CLI: --allow-uniform-block-fallback) to move them into uniform block '" +
-          kDefaultUniformBlockName + "' at binding " +
-          std::to_string(kDefaultUniformBlockBinding) + " and upload them with GX2Set" +
-          setter + "UniformBlock instead of GX2Set" + setter + "UniformReg";
-}
-
 static unsigned FragmentColorBufferCount(const nir_shader *nir)
 {
    unsigned count = 0;
@@ -1090,12 +1075,22 @@ struct CafeCompiler::CompileState {
    r600_pipe_shader pipe_shader{};
    r600_shader_key key{};
    std::vector<unsigned> ubo_bindings;
-   bool uniform_registers = false;
+   GX2ShaderMode mode = GX2_SHADER_MODE_UNIFORM_REGISTER;
+   GX2ShaderMode requirement = GX2_SHADER_MODE_UNIFORM_REGISTER;
    bool lower_loose_uniforms = false;
+   bool uses_loose_uniforms = false;
+   bool uses_uniform_blocks = false;
    std::array<unsigned, 32> vertex_semantics{};
    std::array<int, 32> attribute_locations{};
    std::unordered_map<std::string, unsigned> sampler_bindings;
    ReflectionInfo reflection;
+
+   bool NeedsUniformBlockMode() const
+   {
+      return uses_uniform_blocks ||
+         (uses_loose_uniforms && program->Parameters &&
+          program->Parameters->NumParameterValues > kMaxAluConstComponents);
+   }
 
    ~CompileState()
    {
@@ -1217,11 +1212,10 @@ bool CafeCompiler::InitializeContext()
    return true;
 }
 
-bool CafeCompiler::Compile(const char *source,
-                           unsigned shader_type,
-                           CompileState &state,
-                           std::string &diagnostics,
-                           GLSL_COMPILER_FLAG flags)
+bool CafeCompiler::CompileFrontend(const char *source,
+                                    unsigned shader_type,
+                                    CompileState &state,
+                                    std::string &diagnostics)
 {
    if (!source) {
       diagnostics = "Shader source is null";
@@ -1262,17 +1256,59 @@ bool CafeCompiler::Compile(const char *source,
    nir_shader_gather_info(state.nir, nir_shader_get_entrypoint(state.nir));
    nir_build_program_resource_list(&m_ctx->Const, state.shader_program, false);
 
-   if (!PrepareNir(state, diagnostics, flags))
-      return false;
-   if (!CompileR600(state, diagnostics))
-      return false;
-
+   /* Declarations can survive linking without any reads, especially unused blocks. */
+   nir_foreach_function_impl(impl, state.nir) {
+      nir_foreach_block(block, impl) {
+         nir_foreach_instr(instr, block) {
+            if (instr->type != nir_instr_type_intrinsic)
+               continue;
+            const nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
+            if (intrinsic->intrinsic == nir_intrinsic_load_ubo)
+               state.uses_uniform_blocks = true;
+            else if (intrinsic->intrinsic == nir_intrinsic_load_uniform)
+               state.uses_loose_uniforms = true;
+            else if (intrinsic->intrinsic == nir_intrinsic_load_deref ||
+                     intrinsic->intrinsic == nir_intrinsic_copy_deref) {
+               const unsigned source = intrinsic->intrinsic == nir_intrinsic_copy_deref ? 1 : 0;
+               const nir_deref_instr *deref = nir_src_as_deref(intrinsic->src[source]);
+               state.uses_uniform_blocks |= nir_deref_mode_is(deref, nir_var_mem_ubo);
+               state.uses_loose_uniforms |= nir_deref_mode_is(deref, nir_var_uniform);
+            }
+         }
+      }
+   }
    return true;
 }
 
-bool CafeCompiler::PrepareNir(CompileState &state,
-                              std::string &diagnostics,
-                              GLSL_COMPILER_FLAG flags)
+bool CafeCompiler::SelectMode(GLSLCompileMode requested_mode, CompileState &first,
+                              CompileState *second, std::string &diagnostics)
+{
+   if (requested_mode != GLSL_COMPILE_AUTO && requested_mode != GLSL_COMPILE_REGISTER &&
+       requested_mode != GLSL_COMPILE_BLOCK) {
+      diagnostics = "Invalid compile mode";
+      return false;
+   }
+
+   const bool needs_blocks = first.NeedsUniformBlockMode() ||
+                             (second && second->NeedsUniformBlockMode());
+   if (requested_mode == GLSL_COMPILE_REGISTER && needs_blocks) {
+      const CompileState &state = first.NeedsUniformBlockMode() ? first : *second;
+      diagnostics = state.stage == MESA_SHADER_VERTEX ? "Vertex shader: " : "Pixel shader: ";
+      diagnostics += state.uses_uniform_blocks ?
+         "Explicit uniform blocks cannot use register mode" :
+         "Non-block uniforms exceed Latte's 1024-component ALU constant file";
+      diagnostics += ". Use GLSL_COMPILE_AUTO or GLSL_COMPILE_BLOCK (CLI: --uniform-mode auto or block)";
+      return false;
+   }
+
+   first.mode = requested_mode == GLSL_COMPILE_BLOCK || needs_blocks ?
+      GX2_SHADER_MODE_UNIFORM_BLOCK : GX2_SHADER_MODE_UNIFORM_REGISTER;
+   if (second)
+      second->mode = first.mode;
+   return true;
+}
+
+bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
 {
    if (state.stage == MESA_SHADER_VERTEX &&
        !BuildVertexSemanticMap(state.nir, state.vertex_semantics,
@@ -1301,23 +1337,10 @@ bool CafeCompiler::PrepareNir(CompileState &state,
 
    AssignUniformLocations(state.program, state.nir);
 
-   /* GX2 selects one constant file per shader; the other reads back as zero. */
-   const unsigned loose_components = state.program->Parameters ?
-      state.program->Parameters->NumParameterValues : 0;
-   const bool mixes_uniform_modes = loose_components != 0 && !state.ubo_bindings.empty();
-   const bool exceeds_register_limit = loose_components > kMaxAluConstComponents;
-   const bool needs_uniform_block_fallback =
-      mixes_uniform_modes || exceeds_register_limit;
-   const bool allow_uniform_block_fallback =
-      flags & GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK;
-
-   if (needs_uniform_block_fallback && !allow_uniform_block_fallback) {
-      diagnostics = UniformBlockFallbackError(state.stage, exceeds_register_limit);
-      return false;
-   }
-
-   state.lower_loose_uniforms = needs_uniform_block_fallback;
-   state.uniform_registers = loose_components != 0 && !state.lower_loose_uniforms;
+   /* GX2 selects one constant file for the draw, shared by both stages. */
+   state.lower_loose_uniforms = state.uses_loose_uniforms &&
+                               state.mode == GX2_SHADER_MODE_UNIFORM_BLOCK;
+   state.requirement = state.mode;
 
    if (state.lower_loose_uniforms) {
       if (std::find(state.ubo_bindings.begin(),
@@ -1396,14 +1419,27 @@ bool CafeCompiler::CompileR600(CompileState &state, std::string &diagnostics)
    return true;
 }
 
-GX2VertexShader *CafeCompiler::CompileVertexShader(const char *source,
-                                                  std::string &diagnostics,
-                                                  GLSL_COMPILER_FLAG flags)
+GX2ShaderMode CafeCompiler::CompileVertexShader(const char *source, GLSLCompileMode requested_mode,
+                                                      GX2VertexShader *&shader_output, std::string &diagnostics,
+                                                      GLSL_COMPILER_FLAG flags)
 {
    CompileState state;
-   if (!Compile(source, GL_VERTEX_SHADER, state, diagnostics, flags))
-      return nullptr;
+   if (!CompileFrontend(source, GL_VERTEX_SHADER, state, diagnostics) ||
+       !SelectMode(requested_mode, state, nullptr, diagnostics) ||
+       !PrepareNir(state, diagnostics) || !CompileR600(state, diagnostics))
+      return GLSL_SHADER_MODE_ERROR;
 
+   GX2VertexShader *shader = CreateVertexShader(state, diagnostics, flags);
+   if (!shader)
+      return GLSL_SHADER_MODE_ERROR;
+   shader_output = shader;
+   return state.requirement;
+}
+
+GX2VertexShader *CafeCompiler::CreateVertexShader(CompileState &state,
+                                                 std::string &diagnostics,
+                                                 GLSL_COMPILER_FLAG flags)
+{
    std::unique_ptr<GX2VertexShader, decltype(&FreeVertexShader)> output(
       static_cast<GX2VertexShader *>(calloc(1, sizeof(GX2VertexShader))),
       FreeVertexShader);
@@ -1412,8 +1448,7 @@ GX2VertexShader *CafeCompiler::CompileVertexShader(const char *source,
       return nullptr;
    }
 
-   output->mode = state.uniform_registers ?
-      GX2_SHADER_MODE_UNIFORM_REGISTER : GX2_SHADER_MODE_UNIFORM_BLOCK;
+   output->mode = state.mode;
    if (!CopyProgram(state.pipe_shader.shader, output->program, output->size) ||
        !CopyReflection(state.reflection, output.get()) ||
        !CopyAttributes(state.reflection, output.get())) {
@@ -1427,14 +1462,27 @@ GX2VertexShader *CafeCompiler::CompileVertexShader(const char *source,
    return output.release();
 }
 
-GX2PixelShader *CafeCompiler::CompilePixelShader(const char *source,
-                                                std::string &diagnostics,
-                                                GLSL_COMPILER_FLAG flags)
+GX2ShaderMode CafeCompiler::CompilePixelShader(const char *source, GLSLCompileMode requested_mode,
+                                                     GX2PixelShader *&shader_output, std::string &diagnostics,
+                                                     GLSL_COMPILER_FLAG flags)
 {
    CompileState state;
-   if (!Compile(source, GL_FRAGMENT_SHADER, state, diagnostics, flags))
-      return nullptr;
+   if (!CompileFrontend(source, GL_FRAGMENT_SHADER, state, diagnostics) ||
+       !SelectMode(requested_mode, state, nullptr, diagnostics) ||
+       !PrepareNir(state, diagnostics) || !CompileR600(state, diagnostics))
+      return GLSL_SHADER_MODE_ERROR;
 
+   GX2PixelShader *shader = CreatePixelShader(state, diagnostics, flags);
+   if (!shader)
+      return GLSL_SHADER_MODE_ERROR;
+   shader_output = shader;
+   return state.requirement;
+}
+
+GX2PixelShader *CafeCompiler::CreatePixelShader(CompileState &state,
+                                               std::string &diagnostics,
+                                               GLSL_COMPILER_FLAG flags)
+{
    std::unique_ptr<GX2PixelShader, decltype(&FreePixelShader)> output(
       static_cast<GX2PixelShader *>(calloc(1, sizeof(GX2PixelShader))),
       FreePixelShader);
@@ -1443,8 +1491,7 @@ GX2PixelShader *CafeCompiler::CompilePixelShader(const char *source,
       return nullptr;
    }
 
-   output->mode = state.uniform_registers ?
-      GX2_SHADER_MODE_UNIFORM_REGISTER : GX2_SHADER_MODE_UNIFORM_BLOCK;
+   output->mode = state.mode;
    if (!CopyProgram(state.pipe_shader.shader, output->program, output->size) ||
        !CopyReflection(state.reflection, output.get())) {
       diagnostics = "Out of memory copying pixel shader output";
@@ -1455,4 +1502,56 @@ GX2PixelShader *CafeCompiler::CompilePixelShader(const char *source,
    if (flags & GLSL_COMPILER_FLAG_GENERATE_DISASSEMBLY)
       r600_bytecode_disasm(&state.pipe_shader.shader.bc);
    return output.release();
+}
+
+GX2ShaderMode CafeCompiler::CompileShaderPair(const char *vertex_source, const char *pixel_source,
+                                                    GLSLCompileMode requested_mode, GX2VertexShader *&vertex_output,
+                                                    GX2PixelShader *&pixel_output,
+                                                    std::string &diagnostics, GLSL_COMPILER_FLAG flags)
+{
+   CompileState vertex_state, pixel_state;
+   if (!CompileFrontend(vertex_source, GL_VERTEX_SHADER, vertex_state, diagnostics)) {
+      diagnostics = "Vertex shader: " + diagnostics;
+      return GLSL_SHADER_MODE_ERROR;
+   }
+   if (!CompileFrontend(pixel_source, GL_FRAGMENT_SHADER, pixel_state, diagnostics)) {
+      diagnostics = "Pixel shader: " + diagnostics;
+      return GLSL_SHADER_MODE_ERROR;
+   }
+
+   if (!SelectMode(requested_mode, vertex_state, &pixel_state, diagnostics))
+      return GLSL_SHADER_MODE_ERROR;
+   const bool warn_vertex = requested_mode == GLSL_COMPILE_AUTO &&
+      vertex_state.uses_loose_uniforms && !vertex_state.NeedsUniformBlockMode() &&
+      pixel_state.NeedsUniformBlockMode();
+   const bool warn_pixel = requested_mode == GLSL_COMPILE_AUTO &&
+      pixel_state.uses_loose_uniforms && !pixel_state.NeedsUniformBlockMode() &&
+      vertex_state.NeedsUniformBlockMode();
+   for (CompileState *state : {&vertex_state, &pixel_state}) {
+      if (!PrepareNir(*state, diagnostics) || !CompileR600(*state, diagnostics)) {
+         diagnostics = (state == &vertex_state ? "Vertex shader: " : "Pixel shader: ") +
+                       diagnostics;
+         return GLSL_SHADER_MODE_ERROR;
+      }
+   }
+
+   std::unique_ptr<GX2VertexShader, decltype(&FreeVertexShader)> vertex(
+      CreateVertexShader(vertex_state, diagnostics, flags), FreeVertexShader);
+   if (!vertex)
+      return GLSL_SHADER_MODE_ERROR;
+   std::unique_ptr<GX2PixelShader, decltype(&FreePixelShader)> pixel(
+      CreatePixelShader(pixel_state, diagnostics, flags), FreePixelShader);
+   if (!pixel)
+      return GLSL_SHADER_MODE_ERROR;
+
+   vertex_output = vertex.release();
+   pixel_output = pixel.release();
+   if (warn_vertex || warn_pixel) {
+      diagnostics += warn_vertex ?
+         "Warning: Vertex shader loose uniforms were moved into a uniform block because the pixel shader needs block mode. "
+         "Use GX2SetVertexUniformBlock instead of GX2SetVertexUniformReg to upload them.\n" :
+         "Warning: Pixel shader loose uniforms were moved into a uniform block because the vertex shader needs block mode. "
+         "Use GX2SetPixelUniformBlock instead of GX2SetPixelUniformReg to upload them.\n";
+   }
+   return vertex_state.mode;
 }

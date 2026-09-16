@@ -104,8 +104,56 @@ if host_machine.system() != 'cafeos'
   )
 
   test(
-    'cafeglsl-uniform-block-fallback-enabled',
+    'cafeglsl-single-pixel-block',
     cafeglsl_cli,
-    args : ['--allow-uniform-block-fallback', '-ps'] + files('testdata/basic.frag'),
+    args : ['--uniform-mode', 'block', '-ps'] + files('testdata/basic.frag'),
+  )
+
+  test(
+    'cafeglsl-pair-auto',
+    cafeglsl_cli,
+    args : ['--uniform-mode', 'auto', '-vs'] + files('testdata/basic.vert') +
+           ['-ps'] + files('testdata/basic.frag'),
+  )
+
+  test(
+    'cafeglsl-pair-block-reversed',
+    cafeglsl_cli,
+    args : ['--uniform-mode', 'block', '-ps'] + files('testdata/basic.frag') +
+           ['-vs'] + files('testdata/basic.vert'),
+  )
+
+  test(
+    'cafeglsl-pair-default',
+    cafeglsl_cli,
+    args : ['-vs'] + files('testdata/basic.vert') + ['-ps'] + files('testdata/basic.frag'),
+  )
+
+  test(
+    'cafeglsl-single-vertex-block',
+    cafeglsl_cli,
+    args : ['--uniform-mode', 'block', '-vs'] + files('testdata/basic.vert'),
+  )
+
+  test(
+    'cafeglsl-single-pixel-auto',
+    cafeglsl_cli,
+    args : ['--uniform-mode', 'auto', '-ps'] + files('testdata/basic.frag'),
+  )
+
+  test(
+    'cafeglsl-pair-register-rejects-block',
+    cafeglsl_cli,
+    args : ['--uniform-mode', 'register', '-vs'] + files('testdata/basic.vert') +
+           ['-ps'] + files('testdata/basic.frag'),
+    should_fail : true,
+  )
+
+  test(
+    'cafeglsl-invalid-uniform-policy',
+    cafeglsl_cli,
+    args : ['--uniform-mode', 'invalid', '-vs'] + files('testdata/basic.vert') +
+           ['-ps'] + files('testdata/basic.frag'),
+    should_fail : true,
   )
 endif

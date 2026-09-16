@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 #define CHECK(condition)                                                        \
    do {                                                                         \
@@ -199,7 +200,7 @@ static const uint32_t *FindVFetchInTexClause(const void *program,
                return &words[fetch_word];
          }
       }
-      if (word1 & (1u << 21))
+      if (((word1 >> 26) & 0xf) < kCfAlu && (word1 & (1u << 21)))
          break;
    }
    return nullptr;
@@ -294,18 +295,34 @@ static bool HasAluSourceInRange(const void *program,
       if (is_alu) {
          const uint32_t count = ((cf_word1 >> 18) & 0x7f) + 1;
          const uint32_t clause_start = (cf_word0 & 0x3fffff) * 2;
+         uint32_t literal_words = 0;
          for (uint32_t instruction = 0; instruction < count; ++instruction) {
             const uint32_t alu_word = clause_start + instruction * 2;
             if (alu_word + 1 >= word_count)
                break;
             const uint32_t word0 = words[alu_word];
-            const uint32_t selectors[2] = {
+            const uint32_t word1 = words[alu_word + 1];
+            const bool is_op3 = ((word1 >> 15) & 7) != 0;
+            const uint32_t selectors[3] = {
                word0 & 0x1ff,
                (word0 >> 13) & 0x1ff,
+               word1 & 0x1ff,
             };
-            for (unsigned source = 0; source < 2; ++source) {
+            const uint32_t channels[3] = {
+               (word0 >> 10) & 3,
+               (word0 >> 23) & 3,
+               (word1 >> 10) & 3,
+            };
+            for (unsigned source = 0; source < (is_op3 ? 3u : 2u); ++source) {
                if (selectors[source] >= first && selectors[source] <= last)
                   return true;
+               if (selectors[source] == 253 && channels[source] + 1 > literal_words)
+                  literal_words = channels[source] + 1;
+            }
+            /* Skip the group's literals, padded to 64 bits. */
+            if (word0 & (1u << 31)) {
+               instruction += (literal_words + 1) / 2;
+               literal_words = 0;
             }
          }
       }
@@ -401,6 +418,263 @@ static bool HasKcacheBank(const void *program, uint32_t size, uint32_t bank)
    " texmtx0[0] + texmtx1[1] + texmtx2[2] + texmtx3[0] +\n"                     \
    " texmtx4[1] + texmtx5[2] + texmtx6[0] + texmtx7[2])"
 
+static GX2VertexShader *CompileTestVertexShader(const char *source, char *log,
+                                                int log_size, GLSL_COMPILER_FLAG flags)
+{
+   GX2VertexShader *result = nullptr;
+   CompileVertexShader(source, GLSL_COMPILE_BLOCK, &result, log, log_size, flags);
+   return result;
+}
+
+static GX2PixelShader *CompileTestPixelShader(const char *source, char *log,
+                                              int log_size, GLSL_COMPILER_FLAG flags)
+{
+   GX2PixelShader *result = nullptr;
+   CompilePixelShader(source, GLSL_COMPILE_BLOCK, &result, log, log_size, flags);
+   return result;
+}
+
+static int TestShaderPairs()
+{
+   const char *small_vs = "#version 450\nuniform vec4 position;\n"
+                          "void main() { gl_Position = position; }\n";
+   const char *small_ps = "#version 450\nuniform vec4 tint;\n"
+                          "layout(location = 0) out vec4 color;\n"
+                          "void main() { color = tint; }\n";
+   const char *large_vs = "#version 450\nuniform vec4 positions[300];\n"
+                          "void main() { gl_Position = positions[gl_VertexID % 300]; }\n";
+   const char *large_ps = "#version 450\nuniform vec4 colors[300];\n"
+                          "layout(location = 0) out vec4 color;\n"
+                          "void main() { color = colors[int(gl_FragCoord.x) % 300]; }\n";
+   const char *limit_vs = "#version 450\nuniform vec4 positions[256];\n"
+                          "void main() { gl_Position = positions[gl_VertexID & 255]; }\n";
+   const char *limit_ps = "#version 450\nuniform vec4 colors[256];\n"
+                          "layout(location = 0) out vec4 color;\n"
+                          "void main() { color = colors[int(gl_FragCoord.x) & 255]; }\n";
+   const char *block_vs = "#version 450\n"
+                          "layout(binding = 0, std140) uniform Data { vec4 position; };\n"
+                          "void main() { gl_Position = position; }\n";
+   const char *block_ps = "#version 450\n"
+                          "layout(binding = 0, std140) uniform Data { vec4 tint; };\n"
+                          "layout(location = 0) out vec4 color;\n"
+                          "void main() { color = tint; }\n";
+   const char *empty_vs = "#version 450\nvoid main() { gl_Position = vec4(0.0); }\n";
+   const char *empty_ps = "#version 450\nlayout(location = 0) out vec4 color;\n"
+                          "void main() { color = vec4(1.0); }\n";
+   const char *sampler_ps = "#version 450\nuniform sampler2D tex;\n"
+                            "layout(location = 0) out vec4 color;\n"
+                            "void main() { color = texture(tex, vec2(0.0)); }\n";
+   const char *unused_vs = "#version 450\nuniform vec4 unused;\n"
+                           "void main() { gl_Position = vec4(0.0); }\n";
+   const char *mixed_vs = "#version 450\nuniform vec4 offset;\n"
+                          "layout(binding = 1, std140) uniform Data { vec4 position; };\n"
+                          "void main() { gl_Position = position + offset; }\n";
+   const char *unused_block_vs = "#version 450\n"
+                                 "layout(binding = 1, std140) uniform Data { vec4 unused; };\n"
+                                 "void main() { gl_Position = vec4(0.0); }\n";
+   const char *collision_vs = "#version 450\nuniform vec4 offset;\n"
+                              "layout(binding = 0, std140) uniform Data { vec4 position; };\n"
+                              "void main() { gl_Position = position + offset; }\n";
+   const auto none = GLSL_COMPILER_FLAG_NONE;
+   const auto automatic = GLSL_COMPILE_AUTO;
+   const auto registers = GLSL_COMPILE_REGISTER;
+   const auto blocks = GLSL_COMPILE_BLOCK;
+   char diagnostics[4096] = {};
+   GX2VertexShader *pair_vertex = nullptr;
+   GX2PixelShader *pair_pixel = nullptr;
+   FreeShaders(nullptr, nullptr);
+
+   struct PairCase {
+      const char *vs;
+      const char *ps;
+      GLSLCompileMode request;
+      GX2ShaderMode mode;
+      unsigned vertex_blocks;
+      unsigned pixel_blocks;
+      const char *warning_api = nullptr;
+   };
+   const PairCase cases[] = {
+      {small_vs, small_ps, automatic, GX2_SHADER_MODE_UNIFORM_REGISTER, 0, 0},
+      {small_vs, small_ps, registers, GX2_SHADER_MODE_UNIFORM_REGISTER, 0, 0},
+      {limit_vs, limit_ps, registers, GX2_SHADER_MODE_UNIFORM_REGISTER, 0, 0},
+      {large_vs, small_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 1, "GX2SetPixelUniformBlock"},
+      {small_vs, large_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 1, "GX2SetVertexUniformBlock"},
+      {large_vs, large_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 1},
+      {small_vs, small_ps, blocks, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 1},
+      {block_vs, small_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 1, "GX2SetPixelUniformBlock"},
+      {small_vs, block_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 1, "GX2SetVertexUniformBlock"},
+      {block_vs, block_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 1},
+      {mixed_vs, small_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 2, 1, "GX2SetPixelUniformBlock"},
+      {empty_vs, small_ps, automatic, GX2_SHADER_MODE_UNIFORM_REGISTER, 0, 0},
+      {small_vs, empty_ps, automatic, GX2_SHADER_MODE_UNIFORM_REGISTER, 0, 0},
+      {empty_vs, empty_ps, automatic, GX2_SHADER_MODE_UNIFORM_REGISTER, 0, 0},
+      {empty_vs, block_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 0, 1},
+      {block_vs, empty_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 0},
+      {empty_vs, large_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 0, 1},
+      {large_vs, empty_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 0},
+      {empty_vs, empty_ps, blocks, GX2_SHADER_MODE_UNIFORM_BLOCK, 0, 0},
+      {empty_vs, empty_ps, registers, GX2_SHADER_MODE_UNIFORM_REGISTER, 0, 0},
+      {empty_vs, small_ps, blocks, GX2_SHADER_MODE_UNIFORM_BLOCK, 0, 1},
+      {empty_vs, sampler_ps, automatic, GX2_SHADER_MODE_UNIFORM_REGISTER, 0, 0},
+      {unused_vs, block_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 0, 1},
+      {block_vs, sampler_ps, automatic, GX2_SHADER_MODE_UNIFORM_BLOCK, 1, 0},
+   };
+   for (const auto &test : cases) {
+      const auto requirement = CompileShaderPair(test.vs, test.ps, test.request, &pair_vertex, &pair_pixel,
+                                                 diagnostics, sizeof(diagnostics), none);
+      CHECK(requirement == test.mode);
+      if (test.warning_api) {
+         CHECK(strstr(diagnostics, "Warning:"));
+         CHECK(strstr(diagnostics, test.warning_api));
+      } else {
+         CHECK(!diagnostics[0]);
+      }
+      CHECK(pair_vertex && pair_pixel);
+      CHECK(pair_vertex->mode == test.mode && pair_pixel->mode == test.mode);
+      CHECK(pair_vertex->uniformBlockCount == test.vertex_blocks);
+      CHECK(pair_pixel->uniformBlockCount == test.pixel_blocks);
+      if (test.mode == GX2_SHADER_MODE_UNIFORM_BLOCK) {
+         CHECK(!ReadsAluConstFile(pair_vertex->program, pair_vertex->size));
+         CHECK(!ReadsAluConstFile(pair_pixel->program, pair_pixel->size));
+         if (test.vs == small_vs) {
+            CHECK(HasKcacheBank(pair_vertex->program, pair_vertex->size, 0));
+            CHECK(pair_vertex->uniformBlocks[0].size == 16);
+            CHECK(pair_vertex->uniformVars[0].block == 0);
+         }
+         if (test.ps == small_ps) {
+            CHECK(HasKcacheBank(pair_pixel->program, pair_pixel->size, 0));
+            CHECK(pair_pixel->uniformBlocks[0].size == 16);
+            CHECK(pair_pixel->uniformVars[0].block == 0);
+         }
+         if (test.vs == large_vs) {
+            CHECK(pair_vertex->uniformBlocks[0].size == 300 * 16);
+            CHECK(FindVFetchInTexClause(pair_vertex->program, pair_vertex->size, 128));
+         }
+         if (test.ps == large_ps) {
+            CHECK(pair_pixel->uniformBlocks[0].size == 300 * 16);
+            CHECK(FindVFetchInTexClause(pair_pixel->program, pair_pixel->size, 128));
+         }
+      } else {
+         if (test.vs == small_vs)
+            CHECK(ReadsAluConstFile(pair_vertex->program, pair_vertex->size));
+         if (test.ps == small_ps)
+            CHECK(ReadsAluConstFile(pair_pixel->program, pair_pixel->size));
+      }
+      FreeShaders(pair_vertex, pair_pixel);
+      pair_vertex = nullptr;
+      pair_pixel = nullptr;
+   }
+
+   for (GLSLCompileMode request : {automatic, registers, blocks}) {
+      for (const char *source : {small_vs, large_vs, limit_vs, block_vs, mixed_vs, empty_vs, unused_vs, unused_block_vs}) {
+         GX2VertexShader *result = nullptr;
+         const bool needs_blocks = source == large_vs || source == block_vs || source == mixed_vs;
+         const bool empty = source == empty_vs || source == unused_vs || source == unused_block_vs;
+         const auto requirement = CompileVertexShader(source, request, &result,
+                                               diagnostics, sizeof(diagnostics), none);
+         CHECK((requirement != GLSL_SHADER_MODE_ERROR) == !(request == registers && needs_blocks));
+         if (requirement == GLSL_SHADER_MODE_ERROR) {
+            CHECK(!result);
+            CHECK(strstr(diagnostics, "register mode") || strstr(diagnostics, "ALU constant file"));
+            continue;
+         }
+         const auto mode = request == blocks || needs_blocks ?
+            GX2_SHADER_MODE_UNIFORM_BLOCK : GX2_SHADER_MODE_UNIFORM_REGISTER;
+         CHECK(result->mode == mode);
+         CHECK(requirement == mode);
+         CHECK(empty || mode != GX2_SHADER_MODE_UNIFORM_BLOCK ||
+               !ReadsAluConstFile(result->program, result->size));
+         if (source == small_vs && mode == GX2_SHADER_MODE_UNIFORM_REGISTER)
+            CHECK(ReadsAluConstFile(result->program, result->size));
+         FreeVertexShader(result);
+      }
+      for (const char *source : {small_ps, large_ps, limit_ps, block_ps, empty_ps, sampler_ps}) {
+         GX2PixelShader *result = nullptr;
+         const bool needs_blocks = source == large_ps || source == block_ps;
+         const bool empty = source == empty_ps || source == sampler_ps;
+         const auto requirement = CompilePixelShader(source, request, &result,
+                                              diagnostics, sizeof(diagnostics), none);
+         CHECK((requirement != GLSL_SHADER_MODE_ERROR) == !(request == registers && needs_blocks));
+         if (requirement == GLSL_SHADER_MODE_ERROR) {
+            CHECK(!result);
+            CHECK(strstr(diagnostics, "register mode") || strstr(diagnostics, "ALU constant file"));
+            continue;
+         }
+         const auto mode = request == blocks || needs_blocks ?
+            GX2_SHADER_MODE_UNIFORM_BLOCK : GX2_SHADER_MODE_UNIFORM_REGISTER;
+         CHECK(result->mode == mode);
+         CHECK(requirement == mode);
+         CHECK(empty || mode != GX2_SHADER_MODE_UNIFORM_BLOCK ||
+               !ReadsAluConstFile(result->program, result->size));
+         if (source == small_ps && mode == GX2_SHADER_MODE_UNIFORM_REGISTER)
+            CHECK(ReadsAluConstFile(result->program, result->size));
+         FreePixelShader(result);
+      }
+   }
+
+   for (const auto &test : cases) {
+      const bool needs_blocks = test.vs == block_vs || test.vs == mixed_vs || test.ps == block_ps ||
+                                test.vs == large_vs || test.ps == large_ps;
+      const bool ok = CompileShaderPair(test.vs, test.ps, registers, &pair_vertex, &pair_pixel,
+                                        diagnostics, sizeof(diagnostics), none) != GLSL_SHADER_MODE_ERROR;
+      CHECK(ok == !needs_blocks);
+      if (!ok)
+         CHECK(!pair_vertex && !pair_pixel);
+      FreeShaders(pair_vertex, pair_pixel);
+   }
+   CHECK(CompileShaderPair(small_vs, "invalid GLSL", automatic, &pair_vertex, &pair_pixel,
+                            diagnostics, sizeof(diagnostics), none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!pair_vertex && !pair_pixel);
+   CHECK(strstr(diagnostics, "Pixel shader:"));
+   CHECK(CompileShaderPair(collision_vs, small_ps, automatic, &pair_vertex, &pair_pixel,
+                            diagnostics, sizeof(diagnostics), none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!pair_vertex && !pair_pixel);
+   CHECK(strstr(diagnostics, "binding 0 is reserved"));
+   CHECK(CompileShaderPair(nullptr, small_ps, automatic, &pair_vertex, &pair_pixel,
+                            diagnostics, sizeof(diagnostics), none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!pair_vertex && !pair_pixel);
+   CHECK(CompileShaderPair(small_vs, nullptr, automatic, &pair_vertex, &pair_pixel, nullptr, 0, none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!pair_vertex && !pair_pixel);
+   CHECK(CompileShaderPair(small_vs, small_ps, automatic, nullptr, &pair_pixel,
+                           diagnostics, sizeof(diagnostics), none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!pair_pixel && strstr(diagnostics, "output pointers"));
+   CHECK(CompileShaderPair(small_vs, small_ps, automatic, &pair_vertex, nullptr,
+                           nullptr, 0, none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!pair_vertex);
+   GX2VertexShader dummy_vertex{};
+   GX2PixelShader dummy_pixel{};
+   GX2VertexShader *vertex = &dummy_vertex;
+   GX2PixelShader *pixel = &dummy_pixel;
+   CHECK(CompileVertexShader(small_vs, automatic, nullptr, nullptr, 0, none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(CompilePixelShader(small_ps, automatic, nullptr, nullptr, 0, none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(CompileVertexShader(nullptr, automatic, &vertex, nullptr, 0, none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(CompilePixelShader(nullptr, automatic, &pixel, nullptr, 0, none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!vertex && !pixel);
+   pair_vertex = &dummy_vertex;
+   pair_pixel = &dummy_pixel;
+   CHECK(CompileShaderPair(small_vs, "invalid GLSL", automatic, &pair_vertex, &pair_pixel,
+                           nullptr, 0, none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!pair_vertex && !pair_pixel);
+   CHECK(CompileVertexShader(empty_vs, automatic, &vertex, nullptr, 0, none) == GX2_SHADER_MODE_UNIFORM_REGISTER);
+   CHECK(CompilePixelShader(block_ps, automatic, &pixel, nullptr, 0, none) == GX2_SHADER_MODE_UNIFORM_BLOCK);
+   FreeShaders(vertex, nullptr);
+   FreeShaders(nullptr, pixel);
+   for (GLSLCompileMode invalid : {static_cast<GLSLCompileMode>(-1), static_cast<GLSLCompileMode>(99)}) {
+      CHECK(CompileVertexShader(small_vs, invalid, &vertex, diagnostics, sizeof(diagnostics), none) == GLSL_SHADER_MODE_ERROR);
+      CHECK(!vertex && strstr(diagnostics, "Invalid compile mode"));
+      CHECK(CompilePixelShader(small_ps, invalid, &pixel, diagnostics, sizeof(diagnostics), none) == GLSL_SHADER_MODE_ERROR);
+      CHECK(!pixel && strstr(diagnostics, "Invalid compile mode"));
+      CHECK(CompileShaderPair(small_vs, small_ps, invalid, &pair_vertex, &pair_pixel,
+                              diagnostics, sizeof(diagnostics), none) == GLSL_SHADER_MODE_ERROR);
+      CHECK(!pair_vertex && !pair_pixel && strstr(diagnostics, "Invalid compile mode"));
+   }
+   char short_log[1] = {'x'};
+   CHECK(CompileShaderPair(nullptr, small_ps, automatic, &pair_vertex, &pair_pixel,
+                            short_log, sizeof(short_log), none) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!short_log[0]);
+   return 0;
+}
+
 int main()
 {
    static const char vertex_source[] = R"(
@@ -444,26 +718,33 @@ void main() {
 
    char diagnostics[4096] = {};
    DestroyGLSLCompiler();
-   CHECK(!CompileVertexShader(vertex_source,
+   GX2VertexShader *uninitialized_vertex = nullptr;
+   GX2PixelShader *uninitialized_pixel = nullptr;
+   CHECK(CompileShaderPair(vertex_source, pixel_source, GLSL_COMPILE_AUTO,
+                            &uninitialized_vertex, &uninitialized_pixel, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE) == GLSL_SHADER_MODE_ERROR);
+   CHECK(!uninitialized_vertex && !uninitialized_pixel);
+   CHECK(strstr(diagnostics, "not initialized"));
+   CHECK(!CompileTestVertexShader(vertex_source,
                               diagnostics,
                               sizeof(diagnostics),
                               GLSL_COMPILER_FLAG_NONE));
    CHECK(strstr(diagnostics, "not initialized"));
 
-   CHECK(!CompileVertexShader(nullptr,
+   CHECK(!CompileTestVertexShader(nullptr,
                               diagnostics,
                               sizeof(diagnostics),
                               GLSL_COMPILER_FLAG_NONE));
    InitGLSLCompiler();
    InitGLSLCompiler();
+   CHECK(TestShaderPairs() == 0);
 
-   CHECK(!CompileVertexShader(nullptr,
+   CHECK(!CompileTestVertexShader(nullptr,
                               diagnostics,
                               sizeof(diagnostics),
                               GLSL_COMPILER_FLAG_NONE));
    CHECK(strstr(diagnostics, "null"));
 
-   GX2VertexShader *vertex = CompileVertexShader(
+   GX2VertexShader *vertex = CompileTestVertexShader(
       vertex_source, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE);
    if (!vertex) {
       fprintf(stderr, "Vertex compilation failed: %s\n", diagnostics);
@@ -491,15 +772,11 @@ void main() {
       vertex->uniformVars, vertex->uniformVarCount, "scale");
    CHECK(scale && scale->offset == 4);
 
-   CHECK(!CompilePixelShader(
-      pixel_source, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE));
-   CHECK(strstr(diagnostics, "GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK"));
-
-   GX2PixelShader *pixel = CompilePixelShader(
+   GX2PixelShader *pixel = CompileTestPixelShader(
       pixel_source,
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
+      GLSL_COMPILER_FLAG_NONE);
    if (!pixel) {
       fprintf(stderr, "Pixel compilation failed: %s\n", diagnostics);
       return 1;
@@ -543,7 +820,7 @@ void main() {
    CHECK(loose_color->block == pixel_loose_block);
    CHECK(loose_factor->block == pixel_loose_block);
 
-   GX2VertexShader *loose_vertex = CompileVertexShader(
+   GX2VertexShader *loose_vertex = CompileTestVertexShader(
       "#version 450\n"
       "uniform vec4 positions[4];\n"
       "void main() { gl_Position = positions[gl_VertexID & 3]; }\n",
@@ -551,15 +828,13 @@ void main() {
       sizeof(diagnostics),
       GLSL_COMPILER_FLAG_NONE);
    CHECK(loose_vertex);
-   CHECK(loose_vertex->mode == GX2_SHADER_MODE_UNIFORM_REGISTER);
-   CHECK(loose_vertex->uniformBlockCount == 0);
+   CHECK(loose_vertex->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
+   CHECK(loose_vertex->uniformBlockCount == 1);
    CHECK(!diagnostics[0]);
-   CHECK(HasAluConstSource(loose_vertex->program,
-                           loose_vertex->size,
-                           256,
-                           true));
+   CHECK(!ReadsAluConstFile(loose_vertex->program, loose_vertex->size));
+   CHECK(FindVFetchInTexClause(loose_vertex->program, loose_vertex->size, 128));
 
-   GX2VertexShader *last_uniform_block = CompileVertexShader(
+   GX2VertexShader *last_uniform_block = CompileTestVertexShader(
       "#version 450\n"
       "layout(binding = 15, std140) uniform LastBlock { vec4 position; };\n"
       "void main() { gl_Position = position; }\n",
@@ -575,7 +850,7 @@ void main() {
                        last_uniform_block->size,
                        15));
 
-   GX2PixelShader *sampler_aggregate = CompilePixelShader(
+   GX2PixelShader *sampler_aggregate = CompileTestPixelShader(
       "#version 450\n"
       "struct Material { sampler2D texture; };\n"
       "uniform Material material;\n"
@@ -590,7 +865,7 @@ void main() {
    /* An attribute that linking drops leaves its register alone: tail is named 1
     * once unused is gone, but still arrives in R3.
     */
-   GX2VertexShader *dropped_attribute = CompileVertexShader(
+   GX2VertexShader *dropped_attribute = CompileTestVertexShader(
       "#version 450\n"
       "layout(location = 0) in vec4 head;\n"
       "layout(location = 1) in vec4 unused;\n"
@@ -615,7 +890,7 @@ void main() {
    /* NUM_GPRS: R0 plus R1-R3 for locations 0-2. */
    CHECK((dropped_attribute->regs.sq_pgm_resources_vs & 0xff) >= 4);
 
-   GX2VertexShader *double_attribute = CompileVertexShader(
+   GX2VertexShader *double_attribute = CompileTestVertexShader(
       "#version 450\n"
       "layout(location = 0) in vec4 head;\n"
       "layout(location = 2) in dvec4 wide;\n"
@@ -632,24 +907,23 @@ void main() {
     * mode translates both kinds; a relative constant-file read forces FULL_CFILE,
     * where every constant source is emitted as a uniform register and the kcache reads
     * silently come out wrong. So a shader that mixes loose uniforms with a uniform
-    * block has to put the loose ones in a block too. That changes the upload ABI, so
-    * callers must opt in.
+    * block has to put the loose ones in a block too.
     */
-   GX2VertexShader *indexed_loose_with_block = CompileVertexShader(
+   GX2VertexShader *indexed_loose_with_block = CompileTestVertexShader(
       "#version 450\n"
       "uniform vec4 positions[4];\n"
       "layout(binding = 3, std140) uniform Data { vec4 scale; };\n"
       "void main() { gl_Position = positions[gl_VertexID & 3] * scale; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
+      GLSL_COMPILER_FLAG_NONE);
    CHECK(indexed_loose_with_block);
    CHECK(!(ReadsAluConstFile(indexed_loose_with_block->program,
                              indexed_loose_with_block->size) &&
            ReadsKcache(indexed_loose_with_block->program,
                        indexed_loose_with_block->size)));
 
-   GX2VertexShader *loose_pair_with_block = CompileVertexShader(
+   GX2VertexShader *loose_pair_with_block = CompileTestVertexShader(
       "#version 450\n"
       "uniform vec4 tint;\n"
       "uniform vec4 positions[4];\n"
@@ -657,21 +931,21 @@ void main() {
       "void main() { gl_Position = positions[gl_VertexID & 3] * scale * tint; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
+      GLSL_COMPILER_FLAG_NONE);
    CHECK(loose_pair_with_block);
    CHECK(!(ReadsAluConstFile(loose_pair_with_block->program,
                              loose_pair_with_block->size) &&
            ReadsKcache(loose_pair_with_block->program,
                        loose_pair_with_block->size)));
 
-   GX2VertexShader *mixed_uniforms = CompileVertexShader(
+   GX2VertexShader *mixed_uniforms = CompileTestVertexShader(
       "#version 450\n"
       "layout(binding = 15, std140) uniform LastBlock { vec4 position; };\n"
       "uniform vec4 offset;\n"
       "void main() { gl_Position = position + offset; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
+      GLSL_COMPILER_FLAG_NONE);
    CHECK(mixed_uniforms);
    CHECK(mixed_uniforms->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    CHECK(mixed_uniforms->uniformBlockCount == 2);
@@ -687,34 +961,23 @@ void main() {
    CHECK(!diagnostics[0]);
 
    /* Only mixed shaders lose binding 0. */
-   CHECK(!CompileVertexShader(
+   CHECK(!CompileTestVertexShader(
       "#version 450\n"
       "layout(binding = 0, std140) uniform Data { vec4 scale; };\n"
       "uniform vec4 offset;\n"
       "void main() { gl_Position = scale + offset; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK));
+      GLSL_COMPILER_FLAG_NONE));
    CHECK(strstr(diagnostics, "binding 0 is reserved"));
 
-   /* Oversized register uniforms are also an ABI-changing fallback. */
-   CHECK(!CompileVertexShader(
+   GX2VertexShader *oversized_loose = CompileTestVertexShader(
       "#version 450\n"
       "uniform vec4 positions[300];\n"
       "void main() { gl_Position = positions[gl_VertexID & 255]; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_NONE));
-   CHECK(strstr(diagnostics, "ALU constant file"));
-   CHECK(strstr(diagnostics, "GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK"));
-
-   GX2VertexShader *oversized_loose = CompileVertexShader(
-      "#version 450\n"
-      "uniform vec4 positions[300];\n"
-      "void main() { gl_Position = positions[gl_VertexID & 255]; }\n",
-      diagnostics,
-      sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
+      GLSL_COMPILER_FLAG_NONE);
    CHECK(oversized_loose);
    CHECK(oversized_loose->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    CHECK(oversized_loose->uniformBlockCount == 1);
@@ -724,15 +987,15 @@ void main() {
    CHECK(oversized_loose->uniformBlocks[0].size == 300 * 16);
    CHECK(!diagnostics[0]);
 
-   /* The same fallback also works when another block already selected the kcache. */
-   GX2VertexShader *oversized_mixed = CompileVertexShader(
+   /* Oversized loose uniforms also work alongside an explicit block. */
+   GX2VertexShader *oversized_mixed = CompileTestVertexShader(
       "#version 450\n"
       "layout(binding = 7, std140) uniform Data { vec4 scale; };\n"
       "uniform vec4 positions[300];\n"
       "void main() { gl_Position = positions[gl_VertexID & 255] * scale; }\n",
       diagnostics,
       sizeof(diagnostics),
-      GLSL_COMPILER_FLAG_ALLOW_UNIFORM_BLOCK_FALLBACK);
+      GLSL_COMPILER_FLAG_NONE);
    CHECK(oversized_mixed);
    CHECK(oversized_mixed->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    CHECK(FindUniformBlock(oversized_mixed->uniformBlocks,
@@ -743,7 +1006,7 @@ void main() {
             oversized_mixed->uniformBlockCount,
             "__cafe_loose_uniforms")].size == 300 * 16);
 
-   GX2VertexShader *vertex_id = CompileVertexShader(
+   GX2VertexShader *vertex_id = CompileTestVertexShader(
       "#version 450\n"
       "layout(binding = 3, std140) uniform VertexTable { vec4 values[4]; };\n"
       "void main() { gl_Position = values[gl_VertexID & 3]; }\n",
@@ -762,7 +1025,7 @@ void main() {
    CHECK(vertex_id_fetch);
    CHECK(VFetchUsesConstFields(vertex_id_fetch));
 
-   GX2PixelShader *environment_pass = CompilePixelShader(
+   GX2PixelShader *environment_pass = CompileTestPixelShader(
       "#version 450\n"
       "layout(binding = 0) uniform uf_data { vec2 pixelSize; uint isVertical; };\n"
       "layout(location = 0) out vec2 color;\n"
@@ -782,7 +1045,7 @@ void main() {
                           environment_pass->uniformBlockCount,
                           "uf_data") == 0);
 
-   GX2VertexShader *dynamic_block = CompileVertexShader(
+   GX2VertexShader *dynamic_block = CompileTestVertexShader(
       "#version 450\n"
       "layout(binding = 0, std140) uniform Block { vec4 value; } blocks[2];\n"
       "void main() { gl_Position = blocks[gl_VertexID & 1].value; }\n",
@@ -871,14 +1134,14 @@ void main()
 }
 )";
 
-   GX2VertexShader *rio_primitive_vs = CompileVertexShader(
+   GX2VertexShader *rio_primitive_vs = CompileTestVertexShader(
       rio_primitive_vertex, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE);
    if (!rio_primitive_vs) {
       fprintf(stderr, "RIO primitive_renderer.vert failed: %s\n", diagnostics);
       return 1;
    }
-   CHECK(rio_primitive_vs->mode == GX2_SHADER_MODE_UNIFORM_REGISTER);
-   CHECK(rio_primitive_vs->uniformBlockCount == 0);
+   CHECK(rio_primitive_vs->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
+   CHECK(rio_primitive_vs->uniformBlockCount == 1);
    /* Declared Vertex, TexCoord0, ColorRate; named in the other order. */
    CHECK(rio_primitive_vs->attribVarCount == 3);
    CHECK(FindAttribute(rio_primitive_vs->attribVars,
@@ -901,23 +1164,23 @@ void main()
    const GX2UniformVar *rio_color1 = FindUniform(
       rio_primitive_vs->uniformVars, rio_primitive_vs->uniformVarCount, "color1");
    CHECK(rio_wvp && rio_wvp->count == 4 && rio_wvp->offset == 0);
-   CHECK(rio_wvp->type == GX2_SHADER_VAR_TYPE_FLOAT4 && rio_wvp->block == -1);
+   CHECK(rio_wvp->type == GX2_SHADER_VAR_TYPE_FLOAT4 && rio_wvp->block == 0);
    CHECK(rio_user && rio_user->count == 3 && rio_user->offset == 16);
    CHECK(rio_color0 && rio_color0->count == 1 && rio_color0->offset == 28);
    CHECK(rio_color1 && rio_color1->count == 1 && rio_color1->offset == 32);
 
-   GX2PixelShader *rio_primitive_ps = CompilePixelShader(
+   GX2PixelShader *rio_primitive_ps = CompileTestPixelShader(
       rio_primitive_pixel, diagnostics, sizeof(diagnostics), GLSL_COMPILER_FLAG_NONE);
    if (!rio_primitive_ps) {
       fprintf(stderr, "RIO primitive_renderer.frag failed: %s\n", diagnostics);
       return 1;
    }
-   CHECK(rio_primitive_ps->mode == GX2_SHADER_MODE_UNIFORM_REGISTER);
+   CHECK(rio_primitive_ps->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    CHECK(FindSampler(rio_primitive_ps->samplerVars,
                      rio_primitive_ps->samplerVarCount, "texture0") == 0);
    const GX2UniformVar *rio_rate = FindUniform(
       rio_primitive_ps->uniformVars, rio_primitive_ps->uniformVarCount, "rate");
-   CHECK(rio_rate && rio_rate->offset == 0 && rio_rate->block == -1);
+   CHECK(rio_rate && rio_rate->offset == 0 && rio_rate->block == 0);
    /* The two separate compiles have to agree on which semantic carries what. */
    CHECK(rio_primitive_vs->regs.num_spi_vs_out_id == 1);
    CHECK(rio_primitive_ps->regs.num_spi_ps_input_cntl == 2);
@@ -927,7 +1190,7 @@ void main()
          PixelInputSemantic(rio_primitive_ps, 1));
 
    /* RIO-Tests 05: camera matrix as four loose vec4 rows, applied with dot(). */
-   GX2VertexShader *rio_mvp_vs = CompileVertexShader(
+   GX2VertexShader *rio_mvp_vs = CompileTestVertexShader(
       "#version 330 core\n"
       "\n"
       "uniform vec4 mvp[4];\n"
@@ -951,8 +1214,8 @@ void main()
       fprintf(stderr, "RIO-Tests 05 test_shader.vert failed: %s\n", diagnostics);
       return 1;
    }
-   CHECK(rio_mvp_vs->mode == GX2_SHADER_MODE_UNIFORM_REGISTER);
-   CHECK(rio_mvp_vs->uniformBlockCount == 0);
+   CHECK(rio_mvp_vs->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
+   CHECK(rio_mvp_vs->uniformBlockCount == 1);
    CHECK(FindAttribute(rio_mvp_vs->attribVars,
                        rio_mvp_vs->attribVarCount, "v_inPos") == 0);
    CHECK(FindAttribute(rio_mvp_vs->attribVars,
@@ -960,10 +1223,10 @@ void main()
    const GX2UniformVar *rio_mvp = FindUniform(
       rio_mvp_vs->uniformVars, rio_mvp_vs->uniformVarCount, "mvp");
    CHECK(rio_mvp && rio_mvp->count == 4 && rio_mvp->offset == 0);
-   CHECK(rio_mvp->block == -1);
+   CHECK(rio_mvp->block == 0);
 
    /* Sampler-only uniforms touch neither file, so uniform-block mode stays free. */
-   GX2PixelShader *rio_mix_ps = CompilePixelShader(
+   GX2PixelShader *rio_mix_ps = CompileTestPixelShader(
       "#version 330 core\n"
       "\n"
       "uniform sampler2D texture0;\n"
@@ -994,7 +1257,7 @@ void main()
    CHECK(VertexExportSemantic(rio_mvp_vs, 0) == PixelInputSemantic(rio_mix_ps, 0));
 
    /* setUniform writes a vec4 at a time, so each vec3 takes a full slot. */
-   GX2PixelShader *rio_light_ps = CompilePixelShader(
+   GX2PixelShader *rio_light_ps = CompileTestPixelShader(
       "#version 330 core\n"
       "\n"
       "uniform vec3 lightColor;\n"
@@ -1028,7 +1291,7 @@ void main()
       fprintf(stderr, "RIO-Tests 07 test_shader.frag failed: %s\n", diagnostics);
       return 1;
    }
-   CHECK(rio_light_ps->mode == GX2_SHADER_MODE_UNIFORM_REGISTER);
+   CHECK(rio_light_ps->mode == GX2_SHADER_MODE_UNIFORM_BLOCK);
    const GX2UniformVar *rio_light_color = FindUniform(
       rio_light_ps->uniformVars, rio_light_ps->uniformVarCount, "lightColor");
    const GX2UniformVar *rio_light_pos = FindUniform(
@@ -1048,7 +1311,7 @@ void main()
    /* Same three varyings in opposite orders, one surviving each side, so the name is
     * all the two compiles have left in common.
     */
-   GX2VertexShader *rio_named_varying_vs = CompileVertexShader(
+   GX2VertexShader *rio_named_varying_vs = CompileTestVertexShader(
       "#version 330 core\n"
       "layout(location = 0) in vec3 v_inPos;\n"
       "out vec3 FragPos;\n"
@@ -1058,7 +1321,7 @@ void main()
       diagnostics,
       sizeof(diagnostics),
       GLSL_COMPILER_FLAG_NONE);
-   GX2PixelShader *rio_named_varying_ps = CompilePixelShader(
+   GX2PixelShader *rio_named_varying_ps = CompileTestPixelShader(
       "#version 330 core\n"
       "in vec3 Normal;\n"
       "in vec2 TexCoord;\n"
@@ -1077,7 +1340,7 @@ void main()
    /* RIO declares its blocks without a binding, the way GLSL 150 forces. A lone
     * block lands in bank 1.
     */
-   GX2VertexShader *rio_implicit_block_vs = CompileVertexShader(
+   GX2VertexShader *rio_implicit_block_vs = CompileTestVertexShader(
       "#version 330 core\n"
       "\n"
       "layout(std140)\n"
@@ -1115,7 +1378,7 @@ void main()
    /* Adding the binding is not enough: #version 330 core has no binding qualifier
     * without ARB_shading_language_420pack.
     */
-   GX2VertexShader *rio_unqualified_binding_vs = CompileVertexShader(
+   GX2VertexShader *rio_unqualified_binding_vs = CompileTestVertexShader(
       "#version 330 core\n"
       "layout(binding = 0, std140) uniform cViewBlock { vec4 viewProj[4]; };\n"
       "void main() { gl_Position = viewProj[0]; }\n",
@@ -1126,7 +1389,7 @@ void main()
    CHECK(strstr(diagnostics, "unrecognized layout identifier"));
 
    /* With the extension, the same block compiles and lands in the bank it names. */
-   GX2VertexShader *rio_bound_block_vs = CompileVertexShader(
+   GX2VertexShader *rio_bound_block_vs = CompileTestVertexShader(
       "#version 330 core\n"
       "#extension GL_ARB_shading_language_420pack : require\n"
       "\n"
@@ -1163,7 +1426,7 @@ void main()
    CHECK(rio_view_proj->count == 4 && rio_view_proj->block == 0);
 
    /* A block that names its bank keeps it and the rest fit around it. */
-   GX2VertexShader *pinned_block_vs = CompileVertexShader(
+   GX2VertexShader *pinned_block_vs = CompileTestVertexShader(
       "#version 150\n"
       "#extension GL_ARB_shading_language_420pack : require\n"
       "layout(std140) uniform Mat { vec4 mat_color0; };\n"
@@ -1189,7 +1452,7 @@ void main()
     * which GLSL 1.10 has no such thing as. Keep the binding explicit here so this test
     * covers the language default independently of implicit UBO binding assignment.
     */
-   GX2VertexShader *implicit_version_vs = CompileVertexShader(
+   GX2VertexShader *implicit_version_vs = CompileTestVertexShader(
       "#extension GL_ARB_shading_language_420pack : require\n"
       "layout(std140, binding = 0) uniform Shp { vec4 shape; };\n"
       "in vec4 aPosition;\n"
@@ -1208,7 +1471,7 @@ void main()
     * __VERSION__ and the GL_ARB_* macros it gates describe a different language than the
     * one the shader is then parsed as.
     */
-   GX2VertexShader *implicit_version_pp_vs = CompileVertexShader(
+   GX2VertexShader *implicit_version_pp_vs = CompileTestVertexShader(
       "#if __VERSION__ != 330\n"
       "#error implicit version did not reach the preprocessor\n"
       "#endif\n"
@@ -1225,7 +1488,7 @@ void main()
     * restrictions that come with it. This is what separates DefaultGLSLVersion from
     * ForceGLSLVersion, so it stays here to catch anyone folding the two together.
     */
-   GX2VertexShader *declared_version_vs = CompileVertexShader(
+   GX2VertexShader *declared_version_vs = CompileTestVertexShader(
       "#version 110\n"
       "#if __VERSION__ != 110\n"
       "#error declared version was overridden\n"
@@ -1238,7 +1501,7 @@ void main()
       fprintf(stderr, "Declared #version 110 failed: %s\n", diagnostics);
       return 1;
    }
-   CHECK(!CompileVertexShader(
+   CHECK(!CompileTestVertexShader(
       "#version 110\n"
       "layout(std140) uniform Shp { vec4 shape; };\n"
       "void main() { gl_Position = shape; }\n",
@@ -1251,7 +1514,7 @@ void main()
     * (Fixed-function attributes like gl_Color are a separate matter: Latte's semantic
     * map only covers the generic slots, so those still get rejected.)
     */
-   GX2VertexShader *implicit_version_compat_vs = CompileVertexShader(
+   GX2VertexShader *implicit_version_compat_vs = CompileTestVertexShader(
       "attribute vec4 aPosition;\n"
       "varying vec4 vColor;\n"
       "void main() { gl_Position = aPosition; vColor = aPosition.yxzw; }\n",
@@ -1275,7 +1538,7 @@ void main()
       "   gl_Position = vec4(expand_tex_coord( 0 )) + expand_amb( 2 );\n"
       "}\n";
 
-   GX2VertexShader *adjacent_paste_vs = CompileVertexShader(
+   GX2VertexShader *adjacent_paste_vs = CompileTestVertexShader(
       paste_source,
       diagnostics,
       sizeof(diagnostics),
@@ -1287,7 +1550,7 @@ void main()
    CHECK(FindAttribute(adjacent_paste_vs->attribVars,
                        adjacent_paste_vs->attribVarCount, "tex_coord0") >= 0);
 
-   GX2VertexShader *valid_paste_vs = CompileVertexShader(
+   GX2VertexShader *valid_paste_vs = CompileTestVertexShader(
       "#version 150\n"
       "#define GLUE( a, b ) a##b\n"
       "#define VARIANT 1\n"
@@ -1310,7 +1573,7 @@ void main()
                        valid_paste_vs->attribVarCount, "attr_one") >= 0);
 
    /* Retail layout: uniform offsets in 4-byte words, block sizes in bytes. */
-   GX2VertexShader *nsmbu_layout_vs = CompileVertexShader(
+   GX2VertexShader *nsmbu_layout_vs = CompileTestVertexShader(
       "#version 150\n"
       "layout(std140) uniform MdlEnvView {\n"
       "   vec4 cView[3];\n"
@@ -1420,7 +1683,7 @@ void main()
    }
 
    /* The pixel stage's only block takes bank 1. */
-   GX2PixelShader *nsmbu_layout_ps = CompilePixelShader(
+   GX2PixelShader *nsmbu_layout_ps = CompileTestPixelShader(
       "#version 150\n"
       NSMBU_MAT_BLOCK
       "uniform sampler2D tex_map0;\n"
@@ -1474,7 +1737,7 @@ void main()
    }
 
    /* A gap in the attribute names is not a gap in the locations. */
-   GX2VertexShader *nsmbu_attrib_gap_vs = CompileVertexShader(
+   GX2VertexShader *nsmbu_attrib_gap_vs = CompileTestVertexShader(
       "#version 150\n"
       "in ivec4 aBlendIndex;\n"
       "in vec4 aBlendWeight;\n"
@@ -1502,7 +1765,7 @@ void main()
    }
 
    /* The six-attribute retail set, with a colour. */
-   GX2VertexShader *nsmbu_attrib_color_vs = CompileVertexShader(
+   GX2VertexShader *nsmbu_attrib_color_vs = CompileTestVertexShader(
       "#version 150\n"
       "in ivec4 aBlendIndex;\n"
       "in vec4 aBlendWeight;\n"
@@ -1535,7 +1798,7 @@ void main()
     * to keep it, so a declared location wins over the naming above. Where only
     * some are declared, the rest take what is left.
     */
-   GX2VertexShader *explicit_attrib_vs = CompileVertexShader(
+   GX2VertexShader *explicit_attrib_vs = CompileTestVertexShader(
       "#version 330\n"
       "layout(location = 0) in vec3 aPos;\n"
       "layout(location = 1) in vec3 aNrm;\n"
@@ -1552,7 +1815,7 @@ void main()
    CHECK(FindAttribute(explicit_attrib_vs->attribVars,
                        explicit_attrib_vs->attribVarCount, "aNrm") == 1);
 
-   GX2VertexShader *mixed_attrib_vs = CompileVertexShader(
+   GX2VertexShader *mixed_attrib_vs = CompileTestVertexShader(
       "#version 330\n"
       "layout(location = 1) in vec3 zPos;\n"
       "in vec3 aNrm;\n"
@@ -1570,7 +1833,7 @@ void main()
                        mixed_attrib_vs->attribVarCount, "aNrm") == 0);
 
    /* Sampler units follow declaration order. */
-   GX2PixelShader *nsmbu_sampler_gap_ps = CompilePixelShader(
+   GX2PixelShader *nsmbu_sampler_gap_ps = CompileTestPixelShader(
       "#version 150\n"
       "uniform sampler2D tex_map0;\n"
       "uniform sampler2D tex_map2;\n"
@@ -1592,7 +1855,7 @@ void main()
                      nsmbu_sampler_gap_ps->samplerVarCount, "tex_map2") == 1);
 
    /* Six consecutive units, all 2D. */
-   GX2PixelShader *nsmbu_sampler_six_ps = CompilePixelShader(
+   GX2PixelShader *nsmbu_sampler_six_ps = CompileTestPixelShader(
       "#version 150\n"
       "uniform sampler2D tex_map0;\n"
       "uniform sampler2D tex_map1;\n"
@@ -1629,7 +1892,7 @@ void main()
    /* Blocks declared out of name order, one of them an array, and an attribute
     * the shader never reads, so nothing here leans on NSMBU's own ordering.
     */
-   GX2VertexShader *shared_layout_vs = CompileVertexShader(
+   GX2VertexShader *shared_layout_vs = CompileTestVertexShader(
       "#version 150\n"
       "layout(std140) uniform Zulu { vec4 zPos; };\n"
       "layout(std140) uniform Alpha { vec4 aMtx[3]; int aCount; };\n"
@@ -1655,7 +1918,7 @@ void main()
    for (uint32_t i = 0; i < shared_layout_vs->attribVarCount; ++i)
       CHECK(shared_layout_vs->attribVars[i].count == 0);
 
-   GX2PixelShader *shared_layout_ps = CompilePixelShader(
+   GX2PixelShader *shared_layout_ps = CompileTestPixelShader(
       "#version 150\n"
       "layout(std140) uniform Zulu { vec4 zTint; };\n"
       "layout(std140) uniform Alpha { vec4 aBias[2]; };\n"
@@ -1680,7 +1943,7 @@ void main()
    /* Filters that ask for GLSL 3.30 and reach past it anyway, with no
     * #extension line of their own.
     */
-   GX2PixelShader *gather_ps = CompilePixelShader(
+   GX2PixelShader *gather_ps = CompileTestPixelShader(
       "#version 330\n"
       "uniform sampler2D texMap;\n"
       "in vec4 vTexCoord;\n"
@@ -1700,7 +1963,7 @@ void main()
 
    /* Cafe consumes gl_FragCoord directly. The wpos lowering pass must not add
     * the desktop-only gl_FbWposYTransform state uniform to the GX2 ABI. */
-   GX2PixelShader *fragcoord_ps = CompilePixelShader(
+   GX2PixelShader *fragcoord_ps = CompileTestPixelShader(
       "#version 330\n"
       "out vec4 oColor;\n"
       "void main() {\n"
@@ -1719,7 +1982,7 @@ void main()
 
    /* A dynamic discard must reach the R600 kill path and enable the
     * corresponding pixel-stage hardware control bit. */
-   GX2PixelShader *discard_ps = CompilePixelShader(
+   GX2PixelShader *discard_ps = CompileTestPixelShader(
       "#version 450\n"
       "layout(location = 0) in float alpha;\n"
       "layout(location = 0) out vec4 oColor;\n"
@@ -1737,7 +2000,7 @@ void main()
    CHECK((discard_ps->regs.db_shader_control & kDbShaderControlKillEnable) != 0);
    CHECK(HasAluOpcode(discard_ps->program, discard_ps->size, kAluKillgt));
 
-   GX2PixelShader *invalid = CompilePixelShader(
+   GX2PixelShader *invalid = CompileTestPixelShader(
       "#version 450\nthis is invalid;",
       diagnostics,
       sizeof(diagnostics),
@@ -1787,7 +2050,7 @@ void main()
    FreePixelShader(environment_pass);
    DestroyGLSLCompiler();
 
-   GX2VertexShader *still_initialized = CompileVertexShader(
+   GX2VertexShader *still_initialized = CompileTestVertexShader(
       "#version 450\nvoid main() { gl_Position = vec4(0.0); }\n",
       diagnostics,
       sizeof(diagnostics),
@@ -1796,7 +2059,7 @@ void main()
    FreeVertexShader(still_initialized);
 
    DestroyGLSLCompiler();
-   CHECK(!CompileVertexShader(vertex_source,
+   CHECK(!CompileTestVertexShader(vertex_source,
                               diagnostics,
                               sizeof(diagnostics),
                               GLSL_COMPILER_FLAG_NONE));
