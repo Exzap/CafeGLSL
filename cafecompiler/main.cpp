@@ -10,7 +10,7 @@
 
 static void PrintUsage()
 {
-   std::cout << "Usage: glslcompiler.elf [options]\n"
+   std::cout << "Usage: glslcompiler [options]\n"
              << "  -vs <file>  Compile a vertex shader\n"
              << "  -ps <file>  Compile a pixel shader\n"
              << "  -o <file>   Write a GFD .gsh file\n"

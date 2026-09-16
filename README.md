@@ -25,15 +25,15 @@ you can also use the standalone compiler to compile to .gsh files.
 
 #### Compilation:
 
-1. Download a [precompiled release](https://github.com/Exzap/CafeGLSL/releases) or follow the [build instructions](#for-developers-how-to-compile) to compile for your OS.
+1. Download a [precompiled release](https://github.com/Exzap/CafeGLSL/releases) or follow the [build instructions](BUILDING.md) to compile for your OS.
 2. Use the binary in `bin/` to compile your shaders to .gsh files. On Windows, use `glslcompiler.exe`.
 
 ```bash
 # Compile as a pair: both use uniform block mode if either needs it
-bin/glslcompiler.elf -vs shader.vert -ps shader.frag -o shaders.gsh
+bin/glslcompiler -vs shader.vert -ps shader.frag -o shaders.gsh
 
 # Compile single and multiple shaders separately: their uniform modes may differ
-bin/glslcompiler.elf -vs shader.vert -ps shader.frag -vs shader2.vert -ps shader2.frag -o shaders.gsh
+bin/glslcompiler -vs shader.vert -ps shader.frag -vs shader2.vert -ps shader2.frag -o shaders.gsh
 ```
 
 Options:
@@ -51,7 +51,7 @@ Options:
 ```
 
 The first example shows the recommended way to compile shaders, since it guarantees that both will use the same uniform mode.
-If one needs uniform blocks, the other uses block mode too.
+With the default `auto` mode, if one needs uniform blocks, the other uses block mode too.
 The compiler warns if this moves loose uniforms out of registers, as you'll need to upload them at binding 0 using `GX2Set*UniformBlock` instead of `GX2Set*UniformReg`.
 
 Only one vertex shader and one pixel shader compile as a pair. All other combinations compile separately, as in the second example.
@@ -213,42 +213,17 @@ since the shader mode inside `GX2SetShaderMode()` is used for the entire draw ca
 For example, a vertex shader without any uniforms, or only a loose `uniform vec4` (when using the "auto" compile mode) will use the register mode.
 But then when you compile a pixel shader with a uniform block, it'll select uniform block mode.
 
-EVEN when the vertex shader has no uniforms and you only have a pixel shader,
-its still a potential issue due to the C++ application defaulting to always trusting the vertex shader's uniform shader mode.
+Even when only the pixel shader uses uniforms, choosing the mode from the vertex shader alone would be wrong.
+If your application does this, it will select register mode when the pixel shader needs uniform block mode.
 
 Now, if you used `CompileShaderPair()`, in this example it would've moved the vertex shader's loose uniform into a block so both can be used together.
 You'll still have to upload that value with `GX2SetVertexUniformBlock` instead of `GX2SetVertexUniformReg`.
 
 If you compile them separately, recompile the vertex shader with `GLSL_COMPILE_BLOCK` to get the same result.
 
-## For developers: How to compile
+## Building from source
 
-#### Requirements:
-
-Mesa uses Meson and Ninja. You'll also need a C/C++ compiler and the Python
-and system libraries listed in the [build workflow](.github/workflows/build.yml).
-The workflow contains the full setup and test commands for each platform.
-
-For the Wii U library, also install devkitPro with the Wii U development tools and wut.
-
-#### Compilation commands:
-
-Compile the desktop compiler and static library using:
-
-```bash
-./cafecompiler/compile_for_host.sh
-```
-
-See `build-host/cafecompiler/` for `glslcompiler.elf` and `libcafeglsl.a`.
-Windows builds use `glslcompiler.elf.exe`.
-
-Compile the Wii U static library using:
-
-```bash
-./cafecompiler/compile_for_cafe.sh
-```
-
-The library is written to `build-cafe/cafecompiler/libcafeglsl.a`.
+See [BUILDING.md](BUILDING.md) for dependencies and build instructions.
 
 ## Troubleshooting and contributing
 

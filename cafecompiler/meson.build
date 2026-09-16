@@ -79,7 +79,7 @@ if host_machine.system() != 'cafeos'
   test('cafeglsl-smoke', cafeglsl_smoke)
 
   cafeglsl_cli = executable(
-    'glslcompiler.elf',
+    'glslcompiler',
     ['main.cpp'],
     include_directories : include_directories('.'),
     link_with : libcafeglsl,

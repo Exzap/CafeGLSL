@@ -56,7 +56,7 @@ jobs:
         run: meson setup build -Dtools=glsl ${{ env.MESON_ARGS }}
 
       - name: Build
-        run: ninja -C build cafecompiler/glslcompiler.elf cafecompiler/libcafeglsl.a
+        run: ninja -C build cafecompiler/glslcompiler cafecompiler/libcafeglsl.a
 
       - name: Test
         run: meson test -C build --print-errorlogs ${{ env.MESON_TESTS }}
@@ -102,12 +102,12 @@ jobs:
             -Dtools=glsl ${{ env.MESON_ARGS }}
 
       - name: Build
-        run: ninja -C build cafecompiler/glslcompiler.elf.exe cafecompiler/libcafeglsl.a
+        run: ninja -C build cafecompiler/glslcompiler.exe cafecompiler/libcafeglsl.a
 
       - name: Check the exe is self-contained
         # Stands in for a test run, which a Linux runner cannot do for a .exe.
         run: |
-          IMPORTS="$(x86_64-w64-mingw32-objdump -p build/cafecompiler/glslcompiler.elf.exe \
+          IMPORTS="$(x86_64-w64-mingw32-objdump -p build/cafecompiler/glslcompiler.exe \
             | sed -n 's/^\tDLL Name: //p')"
           echo "$IMPORTS"
           if echo "$IMPORTS" | grep -qi '^lib'; then
@@ -159,7 +159,7 @@ jobs:
         run: meson setup build -Dtools=glsl ${{ env.MESON_ARGS }}
 
       - name: Build
-        run: ninja -C build cafecompiler/glslcompiler.elf cafecompiler/libcafeglsl.a
+        run: ninja -C build cafecompiler/glslcompiler cafecompiler/libcafeglsl.a
 
       - name: Test
         run: meson test -C build --print-errorlogs ${{ env.MESON_TESTS }}

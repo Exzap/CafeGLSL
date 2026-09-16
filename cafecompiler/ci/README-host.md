@@ -30,7 +30,7 @@ Options:
                 block     use blocks, moving loose uniforms into a block
 
 The first example shows the recommended way to compile shaders, since it guarantees that both will use the same uniform mode.
-If one needs uniform blocks, the other uses block mode too.
+With the default `auto` mode, if one needs uniform blocks, the other uses block mode too.
 The compiler warns if this moves loose uniforms out of registers, as you'll need to upload them at binding 0 using `GX2Set*UniformBlock` instead of `GX2Set*UniformReg`.
 
 Only one vertex shader and one pixel shader compile as a pair. All other combinations compile separately, as in the second example.

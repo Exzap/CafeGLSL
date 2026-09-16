@@ -37,15 +37,14 @@ install -m 644 "${SRCDIR}/licenses/MIT" "${STAGEDIR}/LICENSE"
 case "${MODE}" in
 host)
 	mkdir -p "${STAGEDIR}/bin"
-	# meson appends .exe to the target name, which already ends in .elf.
-	if [ -f "${BUILDDIR}/cafecompiler/glslcompiler.elf.exe" ]; then
-		install -m 755 "${BUILDDIR}/cafecompiler/glslcompiler.elf.exe" \
+	if [ -f "${BUILDDIR}/cafecompiler/glslcompiler.exe" ]; then
+		install -m 755 "${BUILDDIR}/cafecompiler/glslcompiler.exe" \
 			"${STAGEDIR}/bin/glslcompiler.exe"
 		BINARY="bin/glslcompiler.exe"
 	else
-		install -m 755 "${BUILDDIR}/cafecompiler/glslcompiler.elf" \
-			"${STAGEDIR}/bin/glslcompiler.elf"
-		BINARY="bin/glslcompiler.elf"
+		install -m 755 "${BUILDDIR}/cafecompiler/glslcompiler" \
+			"${STAGEDIR}/bin/glslcompiler"
+		BINARY="bin/glslcompiler"
 	fi
 	;;
 wiiu)
