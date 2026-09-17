@@ -1,0 +1,24 @@
+[binaries]
+c = 'powerpc-eabi-gcc'
+cpp = 'powerpc-eabi-g++'
+ar = 'powerpc-eabi-gcc-ar'
+strip = 'powerpc-eabi-strip'
+pkg-config = 'powerpc-eabi-pkg-config'
+
+[built-in options]
+c_args = ['-DESPRESSO', '-D__WIIU__', '-D__WUT__', '-I/opt/devkitpro/portlibs/wiiu/include', '-I/opt/devkitpro/portlibs/ppc/include', '-I/opt/devkitpro/wut/include', '-mcpu=750', '-meabi', '-mhard-float', '-ffunction-sections', '-fdata-sections', '-fno-asynchronous-unwind-tables', '-fno-unwind-tables', '-fno-pic', '-fno-pie']
+c_link_args = ['-L/opt/devkitpro/portlibs/wiiu/lib', '-L/opt/devkitpro/portlibs/ppc/lib', '-L/opt/devkitpro/wut/lib', '-specs=/opt/devkitpro/wut/share/wut.specs', '-lwut', '-lm']
+cpp_args = ['-DESPRESSO', '-D__WIIU__', '-D__WUT__', '-I/opt/devkitpro/portlibs/wiiu/include', '-I/opt/devkitpro/portlibs/ppc/include', '-I/opt/devkitpro/wut/include', '-mcpu=750', '-meabi', '-mhard-float', '-ffunction-sections', '-fdata-sections', '-fno-asynchronous-unwind-tables', '-fno-unwind-tables', '-fno-exceptions', '-fno-rtti', '-fno-pic', '-fno-pie']
+cpp_link_args = ['-L/opt/devkitpro/portlibs/wiiu/lib', '-L/opt/devkitpro/portlibs/ppc/lib', '-L/opt/devkitpro/wut/lib', '-specs=/opt/devkitpro/wut/share/wut.specs', '-lwut', '-lm']
+
+[host_machine]
+system = 'cafeos'
+cpu_family = 'ppc'
+cpu = 'ppc750'
+endian = 'big'
+
+[target_machine]
+system = 'cafeos'
+cpu_family = 'ppc'
+cpu = 'ppc750'
+endian = 'big'
