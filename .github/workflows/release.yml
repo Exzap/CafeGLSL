@@ -1,4 +1,4 @@
-name: Release
+name: Prepare release draft
 
 on:
   push:
@@ -9,12 +9,8 @@ on:
         description: 'Tag to release, e.g. v0.3.0. Created at the current commit if it does not exist.'
         required: true
         type: string
-      draft:
-        description: 'Publish as a draft instead of a live release'
-        type: boolean
-        default: false
       prerelease:
-        description: 'Mark as a pre-release'
+        description: 'Mark the draft as a pre-release when published'
         type: boolean
         default: false
 
@@ -26,7 +22,7 @@ jobs:
     uses: ./.github/workflows/build.yml
 
   release:
-    name: Publish
+    name: Create editable draft
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -68,34 +64,51 @@ jobs:
       - name: Build the archives
         run: ./cafecompiler/ci/archive.sh artifacts dist "$VERSION"
 
-      - name: Write the release notes
-        run: |
-          cat > notes.md <<NOTES
-          A GLSL to GX2 shader compiler for the Wii U (Latte) GPU, built from Mesa.
-
-          | Download | What it is |
-          | --- | --- |
-          | \`cafeglsl-$VERSION-wiiu-ppc.tar.xz\` | The library, cross-compiled for CafeOS. Unpack it over \`/opt/devkitpro/portlibs/wiiu\` and pick it up with CMake or pkg-config. |
-          | \`cafeglsl-$VERSION-linux-x86_64.tar.xz\` | Standalone compiler for Linux. |
-          | \`cafeglsl-$VERSION-windows-x86_64.zip\` | Standalone compiler for Windows. |
-          | \`cafeglsl-$VERSION-macos-arm64.tar.xz\` | Standalone compiler for Apple Silicon Macs. |
-          | \`cafeglsl-$VERSION-macos-x86_64.tar.xz\` | Standalone compiler for Intel Macs. |
-
-          The standalone archives also carry the compiler as a static library and
-          its headers, for host tools that link it directly. Every archive has a
-          README covering its own layout. Checksums are in \`SHA256SUMS\`.
-          NOTES
-
-      - name: Publish the release
+      - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          DRAFT: ${{ inputs.draft && '--draft' || '' }}
           PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
         run: |
+          NOTES="$(cat <<'NOTES_TEXT'
+          ## Breaking changes
+
+          - [Describe breaking changes, or remove this section.]
+
+          ## Changelog
+
+          - [Summarize the changes in this release.]
+
+          ## Downloads
+
+          | Platform | Download | SHA-256 |
+          | --- | --- | --- |
+          NOTES_TEXT
+          )"
+
+          add_download() {
+            local platform="$1" suffix="$2" label="$3"
+            local filename="cafeglsl-${VERSION}-${suffix}"
+            local archive="dist/${filename}"
+            test -f "$archive" || { echo "Missing archive: $archive" >&2; exit 1; }
+            local hash
+            hash="$(sha256sum "$archive")"
+            hash="${hash%% *}"
+            NOTES="${NOTES}
+          | ${platform} | [${label}](https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${filename}) | \`${hash}\` |"
+          }
+
+          add_download 'Wii U' 'wiiu-ppc.tar.xz' 'Static library'
+          add_download 'Linux (x86-64)' 'linux-x86_64.tar.xz' 'Compiler and library'
+          add_download 'Windows (x86-64)' 'windows-x86_64.zip' 'Compiler and library'
+          add_download 'macOS (Apple Silicon)' 'macos-arm64.tar.xz' 'Compiler and library'
+          add_download 'macOS (Intel)' 'macos-x86_64.tar.xz' 'Compiler and library'
+
           gh release create "$TAG" \
             --target "$GITHUB_SHA" \
-            --title "CafeGLSL $VERSION" \
-            --notes-file notes.md \
-            --generate-notes \
-            $DRAFT $PRERELEASE \
+            --title "CafeGLSL $TAG" \
+            --notes "$NOTES" \
+            --draft $PRERELEASE \
             dist/*
+
+          RELEASE_URL="$(gh release view "$TAG" --json url --jq .url)"
+          echo "[Edit the $TAG draft release]($RELEASE_URL), then publish it from GitHub when ready." >> "$GITHUB_STEP_SUMMARY"

@@ -65,6 +65,3 @@ if [ "${FOUND}" -eq 0 ]; then
 	echo "no cafeglsl-* artifact directories found in ${ARTIFACTS}" 1>&2
 	exit 1
 fi
-
-(cd "${OUTDIR}" && sha256sum cafeglsl-* > SHA256SUMS)
-echo "SHA256SUMS"
