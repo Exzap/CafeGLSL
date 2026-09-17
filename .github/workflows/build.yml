@@ -183,6 +183,8 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
+          # The toolchain is already in the container; only use Debian repos here.
+          rm -f /etc/apt/sources.list.d/devkitpro.list
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates git pkg-config ninja-build \
