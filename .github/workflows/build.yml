@@ -183,6 +183,7 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
+          rm -f /etc/apt/sources.list.d/devkitpro.list
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates git pkg-config ninja-build \
