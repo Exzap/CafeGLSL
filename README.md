@@ -25,7 +25,7 @@ you can also use the standalone compiler to compile to .gsh files.
 
 #### Compilation:
 
-1. Download a [precompiled release](https://github.com/Exzap/CafeGLSL/releases) or follow the [build instructions](BUILDING.md) to compile for your OS.
+1. Download a [precompiled release](https://github.com/Exzap/CafeGLSL/releases), [compile it yourself](BUILDING.md), or use [Docker](#docker).
 2. Use the binary in `bin/` to compile your shaders to .gsh files. On Windows, use `glslcompiler.exe`.
 
 ```bash
@@ -90,6 +90,8 @@ The Wii U release is laid out as a devkitPro portlib, so it can be extracted str
 ```bash
 tar -xf <this-archive> -C /opt/devkitpro/portlibs/wiiu --strip-components=1
 ```
+
+For applications built in Docker, see the [Wii U library image](#wii-u-library).
 
 Then link it with CMake:
 
@@ -224,6 +226,36 @@ If you compile them separately, recompile the vertex shader with `GLSL_COMPILE_B
 ## Building from source
 
 See [BUILDING.md](BUILDING.md) for dependencies and build instructions.
+
+## Docker
+
+### Standalone compiler
+
+Compile shaders from the current directory (bash):
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+  ghcr.io/exzap/cafeglsl:latest \
+  -vs shader.vert -ps shader.frag -o shaders.gsh
+```
+
+Compile shaders from the current directory (powershell):
+
+```powershell
+docker run --rm -v "${PWD}:/work" `
+  ghcr.io/exzap/cafeglsl:latest `
+  -vs shader.vert -ps shader.frag -o shaders.gsh
+```
+
+### Wii U library
+
+Add the library to your application's Dockerfile:
+
+```dockerfile
+COPY --from=ghcr.io/exzap/cafeglsl-wiiu:latest /artifacts $DEVKITPRO
+```
+
+You might have to update the docker container's devkitPPC version if you're experiencing crashes, since devkitPro doesn't guarantee compatibility between compiler versions.
 
 ## Troubleshooting and contributing
 

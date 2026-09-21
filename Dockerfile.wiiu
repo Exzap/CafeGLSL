@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1
+
+ARG DEVKITPPC_IMAGE=ghcr.io/wiiu-env/devkitppc:20260504
+
+FROM ${DEVKITPPC_IMAGE} AS build
+
+ENV DEVKITPRO=/opt/devkitpro \
+    DEVKITPPC=/opt/devkitpro/devkitPPC \
+    PATH=/opt/meson-venv/bin:/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/portlibs/wiiu/bin:/opt/devkitpro/portlibs/ppc/bin:${PATH}
+
+RUN rm -f /etc/apt/sources.list.d/devkitpro.list \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bison \
+        build-essential \
+        ca-certificates \
+        flex \
+        git \
+        ninja-build \
+        pkg-config \
+        python3-venv \
+    && python3 -m venv /opt/meson-venv \
+    && /opt/meson-venv/bin/pip install --no-cache-dir \
+        'meson>=1.4' \
+        mako \
+        packaging \
+        pyyaml \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+RUN find cafecompiler -type f -name '*.sh' -exec sed -i 's/\r$//' {} + \
+    && ./cafecompiler/meson-cross.sh wiiu ppccross-container build-cafe \
+        -Dtools= \
+        -Dgallium-drivers=r600 \
+        -Dvulkan-drivers= \
+        -Dglx=disabled \
+        -Degl=disabled \
+        -Dplatforms= \
+        -Dllvm=disabled \
+        -Db_sanitize=none \
+        -Db_lundef=false \
+        -Db_staticpic=false \
+        -Db_lto=false \
+        --buildtype=release \
+    && ninja -C build-cafe cafecompiler/libcafeglsl.a
+
+RUN ./cafecompiler/ci/package.sh wiiu build-cafe /artifacts/portlibs/wiiu
+
+FROM scratch
+
+LABEL org.opencontainers.image.title="CafeGLSL Wii U library" \
+      org.opencontainers.image.description="PowerPC CafeGLSL static library packaged as a devkitPro artifact image" \
+      org.opencontainers.image.source="https://github.com/Exzap/CafeGLSL"
+
+COPY --from=build /artifacts /artifacts

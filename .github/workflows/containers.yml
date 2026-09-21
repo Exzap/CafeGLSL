@@ -1,0 +1,85 @@
+name: Containers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: containers-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }} image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: compiler
+            kind: host
+            image_suffix: ''
+            file: Dockerfile
+            cache_scope: cafeglsl-host
+          - name: Wii U library
+            kind: wiiu
+            image_suffix: -wiiu
+            file: Dockerfile.wiiu
+            cache_scope: cafeglsl-wiiu
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository }}${{ matrix.image_suffix }}
+      DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        if: matrix.kind == 'host'
+        uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=edge,branch=main,enable=${{ matrix.kind == 'host' }}
+            type=ref,event=pr
+            type=raw,value={{date 'YYYYMMDD'}}-{{sha}},enable=${{ matrix.kind == 'wiiu' && github.event_name == 'push' }}
+            type=raw,value={{date 'YYYYMMDD'}},enable=${{ matrix.kind == 'wiiu' && github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ matrix.kind == 'wiiu' && github.event_name == 'push' }}
+            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
+            type=sha,prefix=sha-
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: ${{ matrix.kind == 'host' && github.event_name != 'pull_request' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+          provenance: mode=max
+          sbom: true
