@@ -1,0 +1,21 @@
+#version 430
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(std430, binding = 1) readonly buffer Input {
+   uint inputValues[16384];
+};
+layout(std430, binding = 7) writeonly buffer Output {
+   uint values[16384];
+};
+layout(std140, binding = 2) uniform Parameters {
+   uint count;
+   uint multiplier;
+   uint offset;
+};
+void main()
+{
+   uvec3 size = gl_NumWorkGroups * gl_WorkGroupSize;
+   uint i = gl_GlobalInvocationID.x + size.x *
+      (gl_GlobalInvocationID.y + size.y * gl_GlobalInvocationID.z);
+   if (i < count)
+      values[i] = inputValues[i] * multiplier + offset;
+}

@@ -2,6 +2,7 @@
 
 #include "compiler/nir/nir.h"
 #include "compiler/nir/nir_builder.h"
+#include "compiler/nir/nir_control_flow.h"
 #include "compiler/nir/nir_shader_compiler_options.h"
 #include "compiler/glsl/glsl_parser_extras.h"
 #include "compiler/glsl/ir.h"
@@ -21,6 +22,7 @@
 #include "gallium/drivers/r600/r600_shader_common.h"
 #include "gallium/drivers/r600/r600d.h"
 #include "gallium/drivers/r600/sfn/sfn_nir.h"
+#include "gallium/drivers/r600/sfn/sfn_instr_mem.h"
 #undef S_FIXED
 #include "main/mtypes.h"
 #include "main/shader_types.h"
@@ -47,9 +49,11 @@
 #include <vector>
 
 constexpr unsigned kMaxUniformBlocks = 16;
+constexpr unsigned kMaxStorageBuffers = 16;
 constexpr unsigned kMaxAluConstComponents = 1024;
 constexpr unsigned kMaxSamplers = 18;
 constexpr unsigned kLatteResourceBase = 0x80;
+constexpr unsigned kLatteAttributeResourceBase = 0xa0;
 constexpr const char *kDefaultUniformBlockName = "__cafe_loose_uniforms";
 constexpr unsigned kDefaultUniformBlockBinding = 0;
 
@@ -566,6 +570,9 @@ static bool BuildReflection(gl_shader_program *shader_program,
          continue;
       }
 
+      if (resource->Type == GL_BUFFER_VARIABLE && stage == MESA_SHADER_COMPUTE)
+         continue;
+
       if (resource->Type != GL_UNIFORM && resource->Type != GL_BUFFER_VARIABLE)
          continue;
 
@@ -1036,6 +1043,13 @@ static void RemapLatteResources(r600_bytecode &bytecode)
         cf_node = cf_node->next) {
       auto *control_flow = reinterpret_cast<r600_bytecode_cf *>(
          reinterpret_cast<char *>(cf_node) - offsetof(r600_bytecode_cf, list));
+      if (bytecode.type == MESA_SHADER_COMPUTE &&
+          control_flow->op == CF_OP_MEM_RAT &&
+          control_flow->rat.inst == r600::RatInstr::STORE_TYPED &&
+          control_flow->rat.id == 0 && control_flow->rat.index_mode == 0 &&
+          control_flow->output.comp_mask == 1)
+         control_flow->op = CF_OP_MEM_EXPORT;
+
       for (list_head *tex_node = control_flow->tex.next;
            tex_node != &control_flow->tex;
            tex_node = tex_node->next) {
@@ -1050,10 +1064,59 @@ static void RemapLatteResources(r600_bytecode &bytecode)
            vtx_node = vtx_node->next) {
          auto *vertex_fetch = reinterpret_cast<r600_bytecode_vtx *>(
             reinterpret_cast<char *>(vtx_node) - offsetof(r600_bytecode_vtx, list));
+         if (bytecode.type == MESA_SHADER_COMPUTE &&
+             vertex_fetch->buffer_id == R600_BUFFER_INFO_CONST_BUFFER &&
+             vertex_fetch->offset == 16) {
+            vertex_fetch->buffer_id = 147;
+            vertex_fetch->offset = 0;
+            vertex_fetch->use_const_fields = 1;
+         }
+         if (bytecode.type == MESA_SHADER_COMPUTE &&
+             vertex_fetch->buffer_id >= R600_IMAGE_REAL_RESOURCE_OFFSET &&
+             vertex_fetch->buffer_id < R600_IMAGE_REAL_RESOURCE_OFFSET + kMaxStorageBuffers)
+            vertex_fetch->buffer_id = kLatteAttributeResourceBase +
+               vertex_fetch->buffer_id - R600_IMAGE_REAL_RESOURCE_OFFSET;
          if (vertex_fetch->buffer_id < kMaxUniformBlocks)
             vertex_fetch->buffer_id += kLatteResourceBase;
       }
    }
+}
+
+static bool LowerComputeSystemValue(nir_builder *builder, nir_intrinsic_instr *intrinsic, void *)
+{
+   if (intrinsic->intrinsic != nir_intrinsic_load_local_invocation_id &&
+       intrinsic->intrinsic != nir_intrinsic_load_workgroup_id &&
+       intrinsic->intrinsic != nir_intrinsic_load_num_workgroups)
+      return false;
+
+   builder->cursor = nir_before_instr(&intrinsic->instr);
+   const auto &size = builder->shader->info.workgroup_size;
+   const unsigned waves = DIV_ROUND_UP(size[0] * size[1] * size[2], 64);
+   nir_def *index = nir_channel(builder, nir_load_local_invocation_id(builder), 0);
+   nir_def *value;
+   if (intrinsic->intrinsic == nir_intrinsic_load_local_invocation_id) {
+      index = nir_umod_imm(builder, index, 64 * waves);
+      value = nir_vec3(builder,
+         nir_umod_imm(builder, index, size[0]),
+         nir_umod_imm(builder, nir_udiv_imm(builder, index, size[0]), size[1]),
+         nir_udiv_imm(builder, index, size[0] * size[1]));
+   } else {
+      nir_def *count = nir_load_num_workgroups(builder);
+      nir_def *x = nir_udiv_imm(builder, nir_channel(builder, count, 0), waves);
+      nir_def *y = nir_channel(builder, count, 1);
+      if (intrinsic->intrinsic == nir_intrinsic_load_num_workgroups) {
+         value = nir_vec3(builder, x, y, nir_channel(builder, count, 2));
+      } else {
+         index = nir_udiv_imm(builder, index, 64 * waves);
+         value = nir_vec3(builder,
+            nir_umod(builder, index, x),
+            nir_umod(builder, nir_udiv(builder, index, x), y),
+            nir_udiv(builder, index, nir_imul(builder, x, y)));
+      }
+   }
+   nir_def_rewrite_uses(&intrinsic->def, value);
+   nir_instr_remove(&intrinsic->instr);
+   return true;
 }
 
 static unsigned FragmentColorBufferCount(const nir_shader *nir)
@@ -1143,6 +1206,15 @@ bool CafeCompiler::InitializeContext()
    InitializeR600NirOptions(*m_nir_options);
    m_ctx->screen->nir_options[MESA_SHADER_VERTEX] = m_nir_options;
    m_ctx->screen->nir_options[MESA_SHADER_FRAGMENT] = m_nir_options;
+   m_ctx->screen->nir_options[MESA_SHADER_COMPUTE] = m_nir_options;
+   m_ctx->Const.MaxShaderStorageBufferBindings = kMaxStorageBuffers;
+   m_ctx->Const.MaxShaderStorageBlockSize = UINT_MAX;
+   m_ctx->Const.MaxCombinedShaderStorageBlocks = kMaxStorageBuffers;
+   m_ctx->Const.Program[MESA_SHADER_COMPUTE].MaxShaderStorageBlocks = kMaxStorageBuffers;
+   m_ctx->Const.Program[MESA_SHADER_COMPUTE].MaxUniformBlocks = kMaxUniformBlocks;
+   m_ctx->Const.Program[MESA_SHADER_COMPUTE].MaxUniformComponents = 16 * 1024;
+   m_ctx->Const.Program[MESA_SHADER_COMPUTE].MaxCombinedUniformComponents =
+      kMaxUniformBlocks * 16 * 1024;
 
    m_ctx->Version = 45;
    m_ctx->Extensions.Version = 45;
@@ -1223,8 +1295,7 @@ bool CafeCompiler::CompileFrontend(const char *source,
    }
 
    const GLenum gl_shader_type = shader_type;
-   state.stage = gl_shader_type == GL_VERTEX_SHADER ?
-      MESA_SHADER_VERTEX : MESA_SHADER_FRAGMENT;
+   state.stage = _mesa_shader_enum_to_shader_stage(gl_shader_type);
    state.shader_program = standalone_create_shader_program();
    state.shader_program->SeparateShader = true;
 
@@ -1339,7 +1410,8 @@ bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
 
    /* GX2 selects one constant file for the draw, shared by both stages. */
    state.lower_loose_uniforms = state.uses_loose_uniforms &&
-                               state.mode == GX2_SHADER_MODE_UNIFORM_BLOCK;
+                               (state.mode == GX2_SHADER_MODE_UNIFORM_BLOCK ||
+                                state.mode == GX2_SHADER_MODE_COMPUTE_SHADER);
    state.requirement = state.mode;
 
    if (state.lower_loose_uniforms) {
@@ -1364,6 +1436,31 @@ bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
 
    NIR_PASS(_, state.nir, gl_nir_lower_buffers, state.shader_program);
    NIR_PASS(_, state.nir, nir_lower_system_values);
+   if (state.stage == MESA_SHADER_COMPUTE) {
+      if (state.nir->info.workgroup_size_variable) {
+         diagnostics = "Variable compute workgroup sizes are not supported yet";
+         return false;
+      }
+      nir_lower_compute_system_values_options options = {};
+      NIR_PASS(_, state.nir, nir_lower_compute_system_values, &options);
+      NIR_PASS(_, state.nir, nir_shader_intrinsics_pass, LowerComputeSystemValue,
+               nir_metadata_control_flow, nullptr);
+      const auto &size = state.nir->info.workgroup_size;
+      const unsigned invocations = size[0] * size[1] * size[2];
+      const unsigned padded_invocations = DIV_ROUND_UP(invocations, 64) * 64;
+      if (invocations != padded_invocations) {
+         nir_function_impl *impl = nir_shader_get_entrypoint(state.nir);
+         nir_cf_list body;
+         nir_cf_extract(&body, nir_before_impl(impl), nir_after_impl(impl));
+         nir_builder builder = nir_builder_at(nir_before_impl(impl));
+         nir_def *index = nir_umod_imm(&builder,
+            nir_channel(&builder, nir_load_local_invocation_id(&builder), 0), padded_invocations);
+         nir_push_if(&builder, nir_ult_imm(&builder, index, invocations));
+         builder.cursor = nir_cf_reinsert(&body, builder.cursor);
+         nir_pop_if(&builder, nullptr);
+         nir_metadata_invalidate(state.nir);
+      }
+   }
 
    state.nir->num_uniforms = state.program->Parameters ?
       DIV_ROUND_UP(state.program->Parameters->NumParameterValues, 4) : 0;
@@ -1383,6 +1480,46 @@ bool CafeCompiler::PrepareNir(CompileState &state, std::string &diagnostics)
    NIR_PASS(_, state.nir, gl_nir_lower_samplers, nullptr);
    nir_shader_gather_info(state.nir, nir_shader_get_entrypoint(state.nir));
    r600_finalize_nir_common(state.nir, R700);
+   if (state.stage == MESA_SHADER_COMPUTE) {
+      int output_binding = -1;
+      nir_foreach_function_impl(impl, state.nir) {
+         nir_foreach_block(block, impl) {
+            nir_foreach_instr(instr, block) {
+               if (instr->type != nir_instr_type_intrinsic)
+                  continue;
+               auto *intrinsic = nir_instr_as_intrinsic(instr);
+               if (intrinsic->intrinsic == nir_intrinsic_get_ssbo_size) {
+                  diagnostics = "Compute shader storage buffer size queries are not supported yet";
+                  return false;
+               }
+               const bool store = intrinsic->intrinsic == nir_intrinsic_store_ssbo;
+               if (!store && intrinsic->intrinsic != nir_intrinsic_load_ssbo)
+                  continue;
+               const unsigned source = store ? 1 : 0;
+               if (!nir_src_is_const(intrinsic->src[source])) {
+                  diagnostics = "Dynamic storage buffer selection is not supported yet";
+                  return false;
+               }
+               const unsigned index = nir_src_as_uint(intrinsic->src[source]);
+               const unsigned binding = state.program->sh.ShaderStorageBlocks[index]->Binding;
+               if (store) {
+                  if (output_binding >= 0 && output_binding != static_cast<int>(binding)) {
+                     diagnostics = "Compute shaders support only one storage buffer output";
+                     return false;
+                  }
+                  output_binding = binding;
+               }
+               if (!store && !(nir_intrinsic_access(intrinsic) & ACCESS_NON_WRITEABLE)) {
+                  diagnostics = "Compute shader storage buffer reads must be readonly";
+                  return false;
+               }
+               nir_builder builder = nir_builder_at(nir_before_instr(instr));
+               nir_src_rewrite(&intrinsic->src[source], nir_imm_int(&builder, store ? 0 : binding));
+            }
+         }
+      }
+      nir_metadata_invalidate(state.nir);
+   }
    return true;
 }
 
@@ -1405,7 +1542,9 @@ bool CafeCompiler::CompileR600(CompileState &state, std::string &diagnostics)
       diagnostics = "Fragment shader exceeds Latte's 32 interpolator slots";
       return false;
    }
-   if (shader.uses_images || shader.uses_atomics || shader.uses_tex_buffers ||
+   if ((shader.uses_images &&
+        (state.stage != MESA_SHADER_COMPUTE || state.nir->info.num_images)) ||
+       shader.uses_atomics || shader.uses_tex_buffers ||
        shader.needs_scratch_space) {
       diagnostics = "Shader uses a resource class not yet supported by CafeGLSL";
       return false;
@@ -1498,6 +1637,50 @@ GX2PixelShader *CafeCompiler::CreatePixelShader(CompileState &state,
       return nullptr;
    }
    FillPixelRegisters(state.pipe_shader, *output);
+
+   if (flags & GLSL_COMPILER_FLAG_GENERATE_DISASSEMBLY)
+      r600_bytecode_disasm(&state.pipe_shader.shader.bc);
+   return output.release();
+}
+
+GX2ShaderMode CafeCompiler::CompileComputeShader(const char *source, GX2ComputeShader *&shader_output,
+                                               std::string &diagnostics, GLSL_COMPILER_FLAG flags)
+{
+   CompileState state;
+   state.mode = GX2_SHADER_MODE_COMPUTE_SHADER;
+   if (!CompileFrontend(source, GL_COMPUTE_SHADER, state, diagnostics) ||
+       !PrepareNir(state, diagnostics) || !CompileR600(state, diagnostics))
+      return GLSL_SHADER_MODE_ERROR;
+
+   GX2ComputeShader *shader = CreateComputeShader(state, diagnostics, flags);
+   if (!shader)
+      return GLSL_SHADER_MODE_ERROR;
+   shader_output = shader;
+   return state.requirement;
+}
+
+GX2ComputeShader *CafeCompiler::CreateComputeShader(CompileState &state,
+                                                    std::string &diagnostics,
+                                                    GLSL_COMPILER_FLAG flags)
+{
+   std::unique_ptr<GX2ComputeShader, decltype(&FreeComputeShader)> output(
+      static_cast<GX2ComputeShader *>(calloc(1, sizeof(GX2ComputeShader))),
+      FreeComputeShader);
+   if (!output) {
+      diagnostics = "Out of memory allocating GX2 compute shader";
+      return nullptr;
+   }
+
+   if (!CopyProgram(state.pipe_shader.shader, output->program, output->size) ||
+       !CopyReflection(state.reflection, output.get())) {
+      diagnostics = "Out of memory copying compute shader output";
+      return nullptr;
+   }
+   output->regs[0] = S_028868_NUM_GPRS(state.pipe_shader.shader.bc.ngpr) |
+                     S_028868_STACK_SIZE(state.pipe_shader.shader.bc.nstack);
+   output->workgroupSizeX = state.nir->info.workgroup_size[0];
+   output->workgroupSizeY = state.nir->info.workgroup_size[1];
+   output->workgroupSizeZ = state.nir->info.workgroup_size[2];
 
    if (flags & GLSL_COMPILER_FLAG_GENERATE_DISASSEMBLY)
       r600_bytecode_disasm(&state.pipe_shader.shader.bc);

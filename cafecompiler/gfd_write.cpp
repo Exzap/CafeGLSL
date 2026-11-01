@@ -23,6 +23,8 @@ enum class BlockType : uint32_t {
    VertexShaderProgram = 5,
    PixelShaderHeader = 6,
    PixelShaderProgram = 7,
+   ComputeShaderHeader = 14,
+   ComputeShaderProgram = 15,
 };
 
 struct DataPatch {
@@ -356,6 +358,53 @@ static Writer WritePixelHeader(const GX2PixelShader &shader)
    return writer;
 }
 
+static Writer WriteComputeHeader(const GX2ComputeShader &shader)
+{
+   Writer writer;
+   std::vector<DataPatch> data_patches;
+   std::vector<TextPatch> text_patches;
+
+   for (uint32_t value : shader.regs)
+      writer.U32(value);
+   writer.U32(shader.size);
+   writer.U32(0);
+
+   DataPatch blocks{writer.size() + 4};
+   writer.U32(shader.uniformBlockCount);
+   writer.U32(0);
+   DataPatch uniforms{writer.size() + 4};
+   writer.U32(shader.uniformVarCount);
+   writer.U32(0);
+   DataPatch initial_values{writer.size() + 4};
+   writer.U32(shader.initialValueCount);
+   writer.U32(0);
+   DataPatch loops{writer.size() + 4};
+   writer.U32(shader.loopVarCount);
+   writer.U32(0);
+   DataPatch samplers{writer.size() + 4};
+   writer.U32(shader.samplerVarCount);
+   writer.U32(0);
+
+   writer.U32(shader.workgroupSizeX);
+   writer.U32(shader.workgroupSizeY);
+   writer.U32(shader.workgroupSizeZ);
+   writer.U32(shader.over64Mode);
+   writer.U32(shader.numWavesPerSimd);
+   WriteRBuffer(writer, shader.gx2rBuffer);
+
+   WriteUniformBlocks(writer, blocks, data_patches, text_patches,
+                      shader.uniformBlocks, shader.uniformBlockCount);
+   WriteUniforms(writer, uniforms, data_patches, text_patches,
+                 shader.uniformVars, shader.uniformVarCount);
+   WriteInitialValues(writer, initial_values, data_patches,
+                      shader.initialValues, shader.initialValueCount);
+   WriteLoops(writer, loops, data_patches, shader.loopVars, shader.loopVarCount);
+   WriteSamplers(writer, samplers, data_patches, text_patches,
+                 shader.samplerVars, shader.samplerVarCount);
+   FinishRelocations(writer, data_patches, text_patches);
+   return writer;
+}
+
 static void WriteBlock(Writer &output,
                        BlockType type,
                        uint32_t id,
@@ -419,6 +468,17 @@ bool WriteGFD(const GFDFile &file, const std::string &path, bool align_blocks)
       if (align_blocks)
          AlignNextBlock(output, block_id);
       WriteBlock(output, BlockType::PixelShaderProgram, block_id++, i,
+                 shader.program, shader.size);
+   }
+
+   for (uint32_t i = 0; i < file.computeShaders.size(); ++i) {
+      const GX2ComputeShader &shader = *file.computeShaders[i];
+      Writer header = WriteComputeHeader(shader);
+      WriteBlock(output, BlockType::ComputeShaderHeader, block_id++, i,
+                 header.data().data(), header.size());
+      if (align_blocks)
+         AlignNextBlock(output, block_id);
+      WriteBlock(output, BlockType::ComputeShaderProgram, block_id++, i,
                  shader.program, shader.size);
    }
 

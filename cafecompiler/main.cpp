@@ -13,6 +13,7 @@ static void PrintUsage()
    std::cout << "Usage: glslcompiler [options]\n"
              << "  -vs <file>  Compile a vertex shader\n"
              << "  -ps <file>  Compile a pixel shader\n"
+             << "  -cs <file>  Compile a compute shader\n"
              << "  -o <file>   Write a GFD .gsh file\n"
              << "  -v          Print R600 disassembly\n"
              << "  --uniform-mode <auto|register|block>\n"
@@ -73,7 +74,8 @@ int main(int argc, char **argv)
             std::cerr << "Invalid uniform mode: " << value << '\n';
             return 1;
          }
-      } else if ((!strcmp(argv[i], "-vs") || !strcmp(argv[i], "-ps")) &&
+      } else if ((!strcmp(argv[i], "-vs") || !strcmp(argv[i], "-ps") ||
+                  !strcmp(argv[i], "-cs")) &&
                  i + 1 < argc) {
          const std::string type = argv[i];
          inputs.emplace_back(type, argv[i + 1]);
@@ -96,7 +98,9 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   const bool compile_pair = inputs.size() == 2 && inputs[0].first != inputs[1].first;
+   const bool compile_pair = inputs.size() == 2 &&
+      ((inputs[0].first == "-vs" && inputs[1].first == "-ps") ||
+       (inputs[0].first == "-ps" && inputs[1].first == "-vs"));
    InitGLSLCompiler();
    unsigned flag_bits = GLSL_COMPILER_FLAG_NONE;
    if (verbose)
@@ -104,6 +108,7 @@ int main(int argc, char **argv)
    const GLSL_COMPILER_FLAG flags = static_cast<GLSL_COMPILER_FLAG>(flag_bits);
    std::vector<GX2VertexShader *> vertex_shaders;
    std::vector<GX2PixelShader *> pixel_shaders;
+   std::vector<GX2ComputeShader *> compute_shaders;
    GFDFile output;
    int result = 0;
 
@@ -161,7 +166,7 @@ int main(int argc, char **argv)
          std::cout << ShaderModeName(mode) << '\n';
          vertex_shaders.push_back(shader);
          output.vertexShaders.push_back(shader);
-      } else {
+      } else if (type == "-ps") {
          GX2PixelShader *shader = nullptr;
          const GX2ShaderMode mode = CompilePixelShader(source.c_str(), requested_mode, &shader,
                                   diagnostics, sizeof(diagnostics), flags);
@@ -173,6 +178,18 @@ int main(int argc, char **argv)
          std::cout << ShaderModeName(mode) << '\n';
          pixel_shaders.push_back(shader);
          output.pixelShaders.push_back(shader);
+      } else {
+         GX2ComputeShader *shader = nullptr;
+         const GX2ShaderMode mode = CompileComputeShader(source.c_str(), &shader,
+                                  diagnostics, sizeof(diagnostics), flags);
+         if (mode == static_cast<GX2ShaderMode>(-1)) {
+            std::cerr << path << ": " << diagnostics << '\n';
+            result = 1;
+            break;
+         }
+         std::cout << ShaderModeName(mode) << '\n';
+         compute_shaders.push_back(shader);
+         output.computeShaders.push_back(shader);
       }
 
       if (diagnostics[0])
@@ -188,6 +205,8 @@ int main(int argc, char **argv)
       FreeVertexShader(shader);
    for (GX2PixelShader *shader : pixel_shaders)
       FreePixelShader(shader);
+   for (GX2ComputeShader *shader : compute_shaders)
+      FreeComputeShader(shader);
    DestroyGLSLCompiler();
    return result;
 }

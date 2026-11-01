@@ -121,6 +121,28 @@ GX2ShaderMode CompilePixelShader(const char *source, GLSLCompileMode requested_m
    return requirement;
 }
 
+GX2ShaderMode CompileComputeShader(const char *source, GX2ComputeShader **shader_output,
+                                 char *info_log, int info_log_size, GLSL_COMPILER_FLAG flags)
+{
+   std::lock_guard<std::mutex> lock(compiler_mutex);
+   std::string diagnostics;
+   GX2ShaderMode requirement = GLSL_SHADER_MODE_ERROR;
+   if (shader_output)
+      *shader_output = nullptr;
+
+   if (!shader_output)
+      diagnostics = "CompileComputeShader requires a shader output pointer";
+   else if (!compiler)
+      diagnostics = "CafeGLSL is not initialized";
+   else if (!compiler->valid())
+      diagnostics = compiler->initialization_error();
+   else
+      requirement = compiler->CompileComputeShader(source, *shader_output, diagnostics, flags);
+
+   CopyDiagnostics(diagnostics, info_log, info_log_size);
+   return requirement;
+}
+
 GX2ShaderMode CompileShaderPair(const char *vertex_source, const char *pixel_source,
                                       GLSLCompileMode requested_mode,
                                       GX2VertexShader **vertex_output, GX2PixelShader **pixel_output,
@@ -173,6 +195,14 @@ void FreeShaders(GX2VertexShader *vertex, GX2PixelShader *pixel)
 {
    FreeVertexShader(vertex);
    FreePixelShader(pixel);
+}
+
+void FreeComputeShader(GX2ComputeShader *shader)
+{
+   if (!shader)
+      return;
+   FreeShaderCommon(shader);
+   free(shader);
 }
 
 } // extern "C"

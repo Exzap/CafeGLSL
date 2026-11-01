@@ -31,6 +31,8 @@ public:
    GX2ShaderMode CompilePixelShader(const char *source, GLSLCompileMode requested_mode,
                                           GX2PixelShader *&shader_output, std::string &diagnostics,
                                           GLSL_COMPILER_FLAG flags);
+   GX2ShaderMode CompileComputeShader(const char *source, GX2ComputeShader *&shader_output,
+                                    std::string &diagnostics, GLSL_COMPILER_FLAG flags);
    GX2ShaderMode CompileShaderPair(const char *vertex_source, const char *pixel_source,
                                          GLSLCompileMode requested_mode, GX2VertexShader *&vertex_output,
                                          GX2PixelShader *&pixel_output,
@@ -54,6 +56,9 @@ private:
    GX2PixelShader *CreatePixelShader(CompileState &state,
                                      std::string &diagnostics,
                                      GLSL_COMPILER_FLAG flags);
+   GX2ComputeShader *CreateComputeShader(CompileState &state,
+                                         std::string &diagnostics,
+                                         GLSL_COMPILER_FLAG flags);
 
    gl_context *m_ctx = nullptr;
    nir_shader_compiler_options *m_nir_options = nullptr;

@@ -2,9 +2,15 @@
 
 #include <stdint.h>
 
+#if defined(__WUT__) || defined(__WIIU__)
+#include <gx2/shaders.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#if !defined(__WUT__) && !defined(__WIIU__)
 
 typedef enum GX2ShaderMode {
    GX2_SHADER_MODE_UNIFORM_REGISTER = 0,
@@ -172,6 +178,30 @@ typedef struct GX2PixelShader {
    GX2SamplerVar *samplerVars;
    GX2RBuffer gx2rBuffer;
 } GX2PixelShader;
+
+#endif
+
+typedef struct GX2ComputeShader {
+   uint32_t regs[12];
+   uint32_t size;
+   void *program;
+   uint32_t uniformBlockCount;
+   GX2UniformBlock *uniformBlocks;
+   uint32_t uniformVarCount;
+   GX2UniformVar *uniformVars;
+   uint32_t initialValueCount;
+   GX2UniformInitialValue *initialValues;
+   uint32_t loopVarCount;
+   GX2LoopVar *loopVars;
+   uint32_t samplerVarCount;
+   GX2SamplerVar *samplerVars;
+   uint32_t workgroupSizeX;
+   uint32_t workgroupSizeY;
+   uint32_t workgroupSizeZ;
+   uint32_t over64Mode;
+   uint32_t numWavesPerSimd;
+   GX2RBuffer gx2rBuffer;
+} GX2ComputeShader;
 
 #ifdef __cplusplus
 }

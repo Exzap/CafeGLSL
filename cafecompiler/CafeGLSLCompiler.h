@@ -2,11 +2,7 @@
 
 #include <stdint.h>
 
-#if defined(__WUT__) || defined(__WIIU__)
-#include <gx2/shaders.h>
-#else
 #include "cafe_gx2.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,6 +40,9 @@ GX2ShaderMode CompileVertexShader(const char *source, GLSLCompileMode requestedM
 GX2ShaderMode CompilePixelShader(const char *source, GLSLCompileMode requestedMode,
                                        GX2PixelShader **shaderOut, char *infoLogOut,
                                        int infoLogMaxLength, GLSL_COMPILER_FLAG flags);
+GX2ShaderMode CompileComputeShader(const char *source, GX2ComputeShader **shaderOut,
+                                 char *infoLogOut, int infoLogMaxLength,
+                                 GLSL_COMPILER_FLAG flags);
 /* Compile a pair with a shared uniform mode. Both sources are required.
  * Matching vertex outputs to pixel inputs is not checked. */
 GX2ShaderMode CompileShaderPair(const char *vertexSource, const char *pixelSource,
@@ -55,6 +54,7 @@ GX2ShaderMode CompileShaderPair(const char *vertexSource, const char *pixelSourc
 /* Free shaders when done. Null shaders are accepted. */
 void FreeVertexShader(GX2VertexShader *shader);
 void FreePixelShader(GX2PixelShader *shader);
+void FreeComputeShader(GX2ComputeShader *shader);
 void FreeShaders(GX2VertexShader *vertex, GX2PixelShader *pixel);
 
 #ifdef __cplusplus
