@@ -344,7 +344,7 @@ GeometryShader::emit_load_per_vertex_input(nir_intrinsic_instr *instr)
                                    dest_swz,
                                    addr,
                                    16 * nir_intrinsic_base(instr),
-                                   R600_GS_RING_CONST_BUFFER,
+                                   R600_GS_RING_FETCH_BUFFER,
                                    nullptr,
                                    fmt);
 

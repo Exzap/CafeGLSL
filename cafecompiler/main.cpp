@@ -12,6 +12,7 @@ static void PrintUsage()
 {
    std::cout << "Usage: glslcompiler [options]\n"
              << "  -vs <file>  Compile a vertex shader\n"
+             << "  -gs <file>  Compile a geometry shader (needs one -vs and one -ps)\n"
              << "  -ps <file>  Compile a pixel shader\n"
              << "  -o <file>   Write a GFD .gsh file\n"
              << "  -v          Print R600 disassembly\n"
@@ -21,6 +22,7 @@ static void PrintUsage()
              << "              block     use blocks, moving loose uniforms into a block\n"
              << '\n'
              << "One -vs and one -ps compile together with a shared mode.\n"
+             << "One -vs, one -gs and one -ps compile together in geometry shader mode.\n"
              << "Other input combinations compile independently.\n";
 }
 
@@ -73,7 +75,8 @@ int main(int argc, char **argv)
             std::cerr << "Invalid uniform mode: " << value << '\n';
             return 1;
          }
-      } else if ((!strcmp(argv[i], "-vs") || !strcmp(argv[i], "-ps")) &&
+      } else if ((!strcmp(argv[i], "-vs") || !strcmp(argv[i], "-gs") ||
+                  !strcmp(argv[i], "-ps")) &&
                  i + 1 < argc) {
          const std::string type = argv[i];
          inputs.emplace_back(type, argv[i + 1]);
@@ -96,7 +99,25 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   const bool compile_pair = inputs.size() == 2 && inputs[0].first != inputs[1].first;
+   const auto count_inputs = [&inputs](const char *type) {
+      unsigned count = 0;
+      for (const auto &input : inputs)
+         count += input.first == type;
+      return count;
+   };
+   const bool compile_geometry_set = count_inputs("-gs") != 0;
+   if (compile_geometry_set &&
+       (inputs.size() != 3 || count_inputs("-vs") != 1 || count_inputs("-gs") != 1 ||
+        count_inputs("-ps") != 1)) {
+      std::cerr << "Error: -gs needs exactly one -vs, one -gs and one -ps.\n";
+      return 1;
+   }
+   if (compile_geometry_set && output_specified) {
+      std::cerr << "Error: writing geometry shaders to a GFD file is not supported yet.\n";
+      return 1;
+   }
+   const bool compile_pair = !compile_geometry_set && inputs.size() == 2 &&
+                             inputs[0].first != inputs[1].first;
    InitGLSLCompiler();
    unsigned flag_bits = GLSL_COMPILER_FLAG_NONE;
    if (verbose)
@@ -138,8 +159,47 @@ int main(int argc, char **argv)
       }
    }
 
+   if (compile_geometry_set) {
+      std::string sources[3];
+      const char *types[3] = {"-vs", "-gs", "-ps"};
+      std::string paths[3];
+      for (unsigned i = 0; i < 3 && !result; ++i) {
+         for (const auto &input : inputs) {
+            if (input.first == types[i])
+               paths[i] = input.second;
+         }
+         if (!ReadFile(paths[i], sources[i])) {
+            std::cerr << "Failed to read shader: " << paths[i] << '\n';
+            result = 1;
+         }
+      }
+      if (!result) {
+         GX2VertexShader *vertex = nullptr;
+         GX2GeometryShader *geometry = nullptr;
+         GX2PixelShader *pixel = nullptr;
+         char diagnostics[8192] = {};
+         const GX2ShaderMode mode = CompileGeometryShaderSet(
+            sources[0].c_str(), sources[1].c_str(), sources[2].c_str(), requested_mode,
+            &vertex, &geometry, &pixel, diagnostics, sizeof(diagnostics), flags);
+         if (mode == static_cast<GX2ShaderMode>(-1)) {
+            std::cerr << paths[0] << " + " << paths[1] << " + " << paths[2] << ": "
+                      << diagnostics << '\n';
+            result = 1;
+         } else {
+            std::cout << ShaderModeName(mode) << '\n'
+                      << "ES ring item size: " << vertex->ringItemsize << " dwords\n"
+                      << "GS ring item size: " << geometry->ringItemSize << " dwords\n";
+            if (diagnostics[0])
+               std::cerr << diagnostics;
+            vertex_shaders.push_back(vertex);
+            pixel_shaders.push_back(pixel);
+            FreeGeometryShader(geometry);
+         }
+      }
+   }
+
    for (const auto &[type, path] : inputs) {
-      if (compile_pair)
+      if (compile_pair || compile_geometry_set)
          break;
       std::string source;
       if (!ReadFile(path, source)) {

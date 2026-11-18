@@ -206,6 +206,37 @@ static const uint32_t *FindVFetchInTexClause(const void *program,
    return nullptr;
 }
 
+/* A VFETCH from resource_id in any fetch clause (TEX, VTX or VTX_TC). */
+static bool HasVFetchFromResource(const void *program, uint32_t size, uint32_t resource_id)
+{
+   const auto *words = static_cast<const uint32_t *>(program);
+   const uint32_t word_count = size / sizeof(uint32_t);
+   for (uint32_t i = 0; i + 1 < word_count; i += 2) {
+      const uint32_t word0 = words[i];
+      const uint32_t word1 = words[i + 1];
+      const uint32_t opcode = (word1 >> 23) & 0x7f;
+      if (opcode == kCfTex || opcode == kCfVtx || opcode == kCfVtxTc) {
+         uint32_t count = (word1 >> 10) & 0x7;
+         count |= ((word1 >> 19) & 0x1) << 3;
+         count++;
+
+         const uint32_t clause_start = word0 * 2;
+         for (uint32_t fetch = 0; fetch < count; ++fetch) {
+            const uint32_t fetch_word = clause_start + fetch * 4;
+            if (fetch_word + 4 > word_count)
+               break;
+            const uint32_t vtx_word0 = words[fetch_word];
+            if ((vtx_word0 & 0x1f) == kVFetch &&
+                ((vtx_word0 >> 8) & 0xff) == resource_id)
+               return true;
+         }
+      }
+      if (((word1 >> 26) & 0xf) < kCfAlu && (word1 & (1u << 21)))
+         break;
+   }
+   return false;
+}
+
 /* VTX_WORD1.USE_CONST_FIELDS */
 static bool VFetchUsesConstFields(const uint32_t *fetch)
 {
@@ -675,6 +706,125 @@ static int TestShaderPairs()
    return 0;
 }
 
+static unsigned GeometryExportSemantic(const GX2GeometryShader *shader, unsigned param)
+{
+   return (shader->regs.spi_vs_out_id[param / 4] >> ((param % 4) * 8)) & 0xff;
+}
+
+static int TestGeometryShaders()
+{
+   static const char vs[] = R"(
+#version 450
+layout(location = 0) in vec2 position;
+layout(location = 1) in vec4 color;
+layout(location = 0) out vec4 vColor;
+void main() {
+   vColor = color;
+   gl_Position = vec4(position, 0.0, 1.0);
+}
+)";
+   static const char gs[] = R"(
+#version 450
+layout(points) in;
+layout(triangle_strip, max_vertices = 4) out;
+layout(location = 0) in vec4 vColor[];
+layout(location = 0) out vec4 gColor;
+layout(binding = 1, std140) uniform SpriteData { vec4 halfSize; };
+uniform float scale;
+void main() {
+   vec4 center = gl_in[0].gl_Position;
+   for (int i = 0; i < 4; ++i) {
+      vec2 corner = vec2(float(i & 1), float(i >> 1)) * 2.0 - 1.0;
+      gColor = vColor[0];
+      gl_Position = center + vec4(corner * halfSize.xy * scale, 0.0, 0.0);
+      EmitVertex();
+   }
+   EndPrimitive();
+}
+)";
+   static const char ps[] = R"(
+#version 450
+layout(location = 0) in vec4 gColor;
+layout(location = 0) out vec4 color;
+void main() { color = gColor; }
+)";
+
+   char log[4096] = {};
+   GX2VertexShader *vertex = nullptr;
+   GX2GeometryShader *geometry = nullptr;
+   GX2PixelShader *pixel = nullptr;
+   const GX2ShaderMode mode = CompileGeometryShaderSet(vs, gs, ps, GLSL_COMPILE_AUTO,
+                                                      &vertex, &geometry, &pixel,
+                                                      log, sizeof(log), GLSL_COMPILER_FLAG_NONE);
+   if (mode != GX2_SHADER_MODE_GEOMETRY_SHADER)
+      fprintf(stderr, "CompileGeometryShaderSet: %s\n", log);
+   CHECK(mode == GX2_SHADER_MODE_GEOMETRY_SHADER);
+   CHECK(vertex && geometry && pixel);
+   CHECK(vertex->mode == GX2_SHADER_MODE_GEOMETRY_SHADER);
+   CHECK(geometry->mode == GX2_SHADER_MODE_GEOMETRY_SHADER);
+   CHECK(pixel->mode == GX2_SHADER_MODE_GEOMETRY_SHADER);
+
+   /* The vertex shader feeds the ESGS ring: one vec4 per GS input
+    * (gl_Position and vColor), counted in dwords.
+    */
+   CHECK(vertex->ringItemsize == 8);
+
+   CHECK(geometry->program && geometry->size);
+   CHECK(geometry->vertexProgram && geometry->vertexProgramSize);
+   CHECK((reinterpret_cast<uintptr_t>(geometry->program) & 0xff) == 0);
+   CHECK((reinterpret_cast<uintptr_t>(geometry->vertexProgram) & 0xff) == 0);
+
+   /* TRISTRIP, scenario G with the 128-vertex cut mode. */
+   CHECK(geometry->regs.vgt_gs_out_prim_type == 2);
+   CHECK(geometry->regs.vgt_gs_mode == (3u | (3u << 3)));
+   /* The copy shader reads gl_Position and gColor, one vec4 each. */
+   CHECK(geometry->regs.sq_gs_vert_itemsize == 8);
+   CHECK(geometry->ringItemSize == 8 * 4);
+
+   /* Both ring reads go through the last fetch resource of their stage. */
+   CHECK(HasVFetchFromResource(geometry->program, geometry->size, 0x9f));
+   CHECK(HasVFetchFromResource(geometry->vertexProgram, geometry->vertexProgramSize, 0x9f));
+
+   /* The copy shader exports gColor under the semantic the pixel shader reads. */
+   CHECK(pixel->regs.num_spi_ps_input_cntl >= 1);
+   CHECK(GeometryExportSemantic(geometry, 0) == PixelInputSemantic(pixel, 0));
+
+   /* Loose uniforms join the geometry shader's blocks. */
+   CHECK(FindUniformBlockIndex(geometry->uniformBlocks, geometry->uniformBlockCount,
+                               "SpriteData") >= 0);
+   CHECK(FindUniform(geometry->uniformVars, geometry->uniformVarCount, "scale"));
+
+   FreeShaders(vertex, pixel);
+   FreeGeometryShader(geometry);
+
+   /* Register mode cannot express geometry shader mode. */
+   CHECK(CompileGeometryShaderSet(vs, gs, ps, GLSL_COMPILE_REGISTER, &vertex, &geometry, &pixel,
+                                  log, sizeof(log), GLSL_COMPILER_FLAG_NONE) ==
+         GLSL_SHADER_MODE_ERROR);
+   CHECK(!vertex && !geometry && !pixel);
+   CHECK(strstr(log, "uniform blocks"));
+
+   /* Errors name the stage. */
+   CHECK(CompileGeometryShaderSet(vs, "#version 450\nvoid main() { oops }\n", ps,
+                                  GLSL_COMPILE_AUTO, &vertex, &geometry, &pixel,
+                                  log, sizeof(log), GLSL_COMPILER_FLAG_NONE) ==
+         GLSL_SHADER_MODE_ERROR);
+   CHECK(strstr(log, "Geometry shader: "));
+   CHECK(CompileGeometryShaderSet(vs, nullptr, ps, GLSL_COMPILE_AUTO,
+                                  &vertex, &geometry, &pixel,
+                                  log, sizeof(log), GLSL_COMPILER_FLAG_NONE) ==
+         GLSL_SHADER_MODE_ERROR);
+   CHECK(strstr(log, "Geometry shader: "));
+
+   CHECK(CompileGeometryShaderSet(vs, gs, ps, GLSL_COMPILE_AUTO, &vertex, nullptr, &pixel,
+                                  log, sizeof(log), GLSL_COMPILER_FLAG_NONE) ==
+         GLSL_SHADER_MODE_ERROR);
+   CHECK(!vertex && !pixel);
+
+   FreeGeometryShader(nullptr);
+   return 0;
+}
+
 int main()
 {
    static const char vertex_source[] = R"(
@@ -737,6 +887,7 @@ void main() {
    InitGLSLCompiler();
    InitGLSLCompiler();
    CHECK(TestShaderPairs() == 0);
+   CHECK(TestGeometryShaders() == 0);
 
    CHECK(!CompileTestVertexShader(nullptr,
                               diagnostics,

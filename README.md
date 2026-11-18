@@ -8,7 +8,7 @@ By default, Wii U offers no way to compile shaders dynamically during runtime, y
 
 ## Current limitations
 
-- No support for geometry, compute or tessellation shaders.
+- No support for compute or tessellation shaders. Geometry shaders are experimental: see [Geometry shaders (experimental)](#geometry-shaders-experimental). No GFD output, `gl_PrimitiveIDIn` or GS instancing yet.
 - Wii U limitation: GX2 uses one uniform mode for both the vertex and pixel shader in each draw. You must select that mode before drawing. See [Important: choose loose uniforms or uniform blocks](#important-choose-loose-uniforms-or-uniform-blocks) below.
 
 ## How to use
@@ -222,6 +222,49 @@ Now, if you used `CompileShaderPair()`, in this example it would've moved the ve
 You'll still have to upload that value with `GX2SetVertexUniformBlock` instead of `GX2SetVertexUniformReg`.
 
 If you compile them separately, recompile the vertex shader with `GLSL_COMPILE_BLOCK` to get the same result.
+
+## Geometry shaders (experimental)
+
+A geometry shader runs in GX2's geometry shader mode, which needs its own vertex shader, so the three stages are compiled together:
+
+```c
+GX2VertexShader *vs; GX2GeometryShader *gs; GX2PixelShader *ps;
+char log[1024];
+if (CompileGeometryShaderSet(vsSource, gsSource, psSource, GLSL_COMPILE_AUTO,
+                             &vs, &gs, &ps, log, sizeof(log),
+                             GLSL_COMPILER_FLAG_NONE) == GLSL_SHADER_MODE_ERROR) {
+    // log says which stage failed
+}
+
+// Rings: sized from the item sizes the compiler filled in, 256-byte aligned.
+uint32_t inSize = GX2CalcGeometryShaderInputRingBufferSize(vs->ringItemsize);
+uint32_t outSize = GX2CalcGeometryShaderOutputRingBufferSize(gs->ringItemSize);
+void *inRing = MEMAllocFromDefaultHeapEx(inSize, 256);
+void *outRing = MEMAllocFromDefaultHeapEx(outSize, 256);
+
+GX2SetShaderModeEx(GX2_SHADER_MODE_GEOMETRY_SHADER,
+                   GX2GetVertexShaderGPRs(vs), GX2GetVertexShaderStackEntries(vs),
+                   GX2GetGeometryShaderGPRs(gs), GX2GetGeometryShaderStackEntries(gs),
+                   GX2GetPixelShaderGPRs(ps), GX2GetPixelShaderStackEntries(ps));
+GX2SetGeometryShaderInputRingBuffer(inRing, inSize);
+GX2SetGeometryShaderOutputRingBuffer(outRing, outSize);
+GX2SetFetchShader(&fetchShader);
+GX2SetVertexShader(vs);
+GX2SetGeometryShader(gs);
+GX2SetPixelShader(ps);
+// Uniforms always come from blocks here: GX2SetGeometryUniformBlock() for the GS.
+
+FreeShaders(vs, ps);
+FreeGeometryShader(gs);
+```
+
+- Every stage uses uniform blocks; loose uniforms move into binding 0 as with `GLSL_COMPILE_BLOCK`. `GLSL_COMPILE_REGISTER` is rejected.
+- The returned vertex shader only works with this geometry shader: it writes the GS input ring, not the rasterizer.
+- Vertex outputs reach geometry inputs by varying slot, so give both sides matching `layout(location = N)` (built-ins like `gl_Position` match by themselves).
+- Ring sizes grow with `max_vertices` times the outputs per vertex. Keep `max_vertices` as low as the shader allows.
+- Tested on a Wii U with `cafecompiler/examples/gs-test` (pass-through and point-expanding geometry shaders). Please report anything that misbehaves.
+
+From the command line: `glslcompiler -vs a.vert -gs a.geom -ps a.frag` (GFD output not supported yet).
 
 ## Building from source
 

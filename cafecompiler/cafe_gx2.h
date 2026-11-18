@@ -173,6 +173,43 @@ typedef struct GX2PixelShader {
    GX2RBuffer gx2rBuffer;
 } GX2PixelShader;
 
+/* Mirrors wut's <gx2/shaders.h>. The vertex program is the GS copy shader, which
+ * runs in the hardware VS stage and reads the GSVS ring.
+ */
+typedef struct GX2GeometryShader {
+   struct {
+      uint32_t sq_pgm_resources_gs;
+      uint32_t vgt_gs_out_prim_type;
+      uint32_t vgt_gs_mode;
+      uint32_t pa_cl_vs_out_cntl;
+      uint32_t sq_pgm_resources_vs;
+      uint32_t sq_gs_vert_itemsize;
+      uint32_t spi_vs_out_config;
+      uint32_t num_spi_vs_out_id;
+      uint32_t spi_vs_out_id[10];
+      uint32_t vgt_strmout_buffer_en;
+   } regs;
+   uint32_t size;
+   void *program;
+   uint32_t vertexProgramSize;
+   void *vertexProgram;
+   GX2ShaderMode mode;
+   uint32_t uniformBlockCount;
+   GX2UniformBlock *uniformBlocks;
+   uint32_t uniformVarCount;
+   GX2UniformVar *uniformVars;
+   uint32_t initialValueCount;
+   GX2UniformInitialValue *initialValues;
+   uint32_t loopVarCount;
+   GX2LoopVar *loopVars;
+   uint32_t samplerVarCount;
+   GX2SamplerVar *samplerVars;
+   uint32_t ringItemSize;
+   int32_t hasStreamOut;
+   uint32_t streamOutStride[4];
+   GX2RBuffer gx2rBuffer;
+} GX2GeometryShader;
+
 #ifdef __cplusplus
 }
 #endif

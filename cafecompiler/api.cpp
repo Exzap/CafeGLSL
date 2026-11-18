@@ -148,6 +148,39 @@ GX2ShaderMode CompileShaderPair(const char *vertex_source, const char *pixel_sou
    return requirement;
 }
 
+GX2ShaderMode CompileGeometryShaderSet(const char *vertex_source, const char *geometry_source,
+                                       const char *pixel_source, GLSLCompileMode requested_mode,
+                                       GX2VertexShader **vertex_output,
+                                       GX2GeometryShader **geometry_output,
+                                       GX2PixelShader **pixel_output,
+                                       char *info_log, int info_log_size, GLSL_COMPILER_FLAG flags)
+{
+   std::lock_guard<std::mutex> lock(compiler_mutex);
+   std::string diagnostics;
+   GX2ShaderMode requirement = GLSL_SHADER_MODE_ERROR;
+   if (vertex_output)
+      *vertex_output = nullptr;
+   if (geometry_output)
+      *geometry_output = nullptr;
+   if (pixel_output)
+      *pixel_output = nullptr;
+
+   if (!vertex_output || !geometry_output || !pixel_output)
+      diagnostics = "CompileGeometryShaderSet requires all three shader output pointers";
+   else if (!compiler)
+      diagnostics = "CafeGLSL is not initialized";
+   else if (!compiler->valid())
+      diagnostics = compiler->initialization_error();
+   else
+      requirement = compiler->CompileGeometryShaderSet(vertex_source, geometry_source, pixel_source,
+                                                       requested_mode, *vertex_output,
+                                                       *geometry_output, *pixel_output,
+                                                       diagnostics, flags);
+
+   CopyDiagnostics(diagnostics, info_log, info_log_size);
+   return requirement;
+}
+
 void FreeVertexShader(GX2VertexShader *shader)
 {
    if (!shader)
@@ -158,6 +191,15 @@ void FreeVertexShader(GX2VertexShader *shader)
          free(const_cast<char *>(shader->attribVars[i].name));
    }
    free(shader->attribVars);
+   free(shader);
+}
+
+void FreeGeometryShader(GX2GeometryShader *shader)
+{
+   if (!shader)
+      return;
+   FreeShaderCommon(shader);
+   align_free(shader->vertexProgram);
    free(shader);
 }
 
