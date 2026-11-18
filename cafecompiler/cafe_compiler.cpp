@@ -857,17 +857,18 @@ static bool BuildVertexSemanticMap(nir_shader *nir,
    return true;
 }
 
-static void FillVertexRegisters(const r600_pipe_shader &pipe_shader,
-                         const std::array<unsigned, 32> &semantics,
-                         GX2VertexShader &output)
+/* The registers describing what the hardware VS stage exports to the rasterizer.
+ * Shared by a plain vertex shader and the GS copy shader, which GX2 programs into
+ * the same registers (GX2VertexShader and GX2GeometryShader name them alike).
+ */
+template <typename Registers>
+static void FillVertexExportRegisters(const r600_shader &shader, Registers &regs)
 {
-   const r600_shader &shader = pipe_shader.shader;
-   output.regs.sq_pgm_resources_vs =
+   regs.sq_pgm_resources_vs =
       S_028868_NUM_GPRS(shader.bc.ngpr) |
       S_028868_STACK_SIZE(shader.bc.nstack);
-   output.regs.vgt_primitiveid_en = 0;
 
-   for (uint32_t &value : output.regs.spi_vs_out_id)
+   for (uint32_t &value : regs.spi_vs_out_id)
       value = 0xffffffff;
 
    for (unsigned i = 0; i < shader.noutput; ++i) {
@@ -875,16 +876,16 @@ static void FillVertexRegisters(const r600_pipe_shader &pipe_shader,
       if (io.export_param < 0)
          continue;
       const unsigned semantic = 0x80 | LatteSemantic(io.varying_slot);
-      uint32_t &word = output.regs.spi_vs_out_id[io.export_param / 4];
+      uint32_t &word = regs.spi_vs_out_id[io.export_param / 4];
       const unsigned shift = (io.export_param & 3) * 8;
       word = (word & ~(0xffu << shift)) | (semantic << shift);
    }
 
-   output.regs.spi_vs_out_config =
+   regs.spi_vs_out_config =
       S_0286C4_VS_EXPORT_COUNT(shader.highest_export_param);
-   output.regs.num_spi_vs_out_id =
+   regs.num_spi_vs_out_id =
       MAX2(1u, DIV_ROUND_UP(shader.highest_export_param + 1, 4));
-   output.regs.pa_cl_vs_out_cntl =
+   regs.pa_cl_vs_out_cntl =
       S_02881C_VS_OUT_CCDIST0_VEC_ENA((shader.clip_dist_write & 0x0f) != 0) |
       S_02881C_VS_OUT_CCDIST1_VEC_ENA((shader.clip_dist_write & 0xf0) != 0) |
       S_02881C_VS_OUT_MISC_VEC_ENA(shader.vs_out_misc_write) |
@@ -892,6 +893,15 @@ static void FillVertexRegisters(const r600_pipe_shader &pipe_shader,
       S_02881C_USE_VTX_EDGE_FLAG(shader.vs_out_edgeflag) |
       S_02881C_USE_VTX_RENDER_TARGET_INDX(shader.vs_out_layer) |
       S_02881C_USE_VTX_VIEWPORT_INDX(shader.vs_out_viewport);
+}
+
+static void FillVertexRegisters(const r600_pipe_shader &pipe_shader,
+                         const std::array<unsigned, 32> &semantics,
+                         GX2VertexShader &output)
+{
+   const r600_shader &shader = pipe_shader.shader;
+   FillVertexExportRegisters(shader, output.regs);
+   output.regs.vgt_primitiveid_en = 0;
 
    output.regs.sq_vtx_semantic_clear = 0xffffffff;
    std::fill(std::begin(output.regs.sq_vtx_semantic),
@@ -1016,6 +1026,61 @@ static void FillPixelRegisters(const r600_pipe_shader &pipe_shader, GX2PixelShad
       position_index >= 0 ? S_0286D8_PROVIDE_Z_TO_SPI(1) : 0;
 }
 
+/* Mirrors r600_update_gs_state() and the GS half of r600_emit_shader_stages() for
+ * R700, in the units GX2SetGeometryShader() writes them in.
+ */
+static void FillGeometryRegisters(const r600_pipe_shader &pipe_shader,
+                                  const nir_shader *nir,
+                                  GX2GeometryShader &output)
+{
+   const r600_shader &shader = pipe_shader.shader;
+   const r600_pipe_shader &copy = *pipe_shader.gs_copy_shader;
+   const unsigned max_vertices = nir->info.gs.vertices_out;
+
+   output.regs.sq_pgm_resources_gs =
+      S_02887C_NUM_GPRS(shader.bc.ngpr) |
+      S_02887C_DX10_CLAMP(1) |
+      S_02887C_STACK_SIZE(shader.bc.nstack);
+   /* As r600_conv_prim_to_gs_out(): a GS emits points, line strips or
+    * triangle strips.
+    */
+   switch (nir->info.gs.output_primitive) {
+   case MESA_PRIM_POINTS:
+      output.regs.vgt_gs_out_prim_type = V_028A6C_OUTPRIM_TYPE_POINTLIST;
+      break;
+   case MESA_PRIM_LINES:
+   case MESA_PRIM_LINE_LOOP:
+   case MESA_PRIM_LINE_STRIP:
+      output.regs.vgt_gs_out_prim_type = V_028A6C_OUTPRIM_TYPE_LINESTRIP;
+      break;
+   default:
+      output.regs.vgt_gs_out_prim_type = V_028A6C_OUTPRIM_TYPE_TRISTRIP;
+      break;
+   }
+
+   unsigned cut_mode;
+   if (max_vertices <= 128)
+      cut_mode = V_028A40_GS_CUT_128;
+   else if (max_vertices <= 256)
+      cut_mode = V_028A40_GS_CUT_256;
+   else if (max_vertices <= 512)
+      cut_mode = V_028A40_GS_CUT_512;
+   else
+      cut_mode = V_028A40_GS_CUT_1024;
+   output.regs.vgt_gs_mode =
+      S_028A40_MODE(V_028A40_GS_SCENARIO_G) | S_028A40_CUT_MODE(cut_mode);
+
+   /* The copy shader runs in the VS stage and exports to the rasterizer. */
+   FillVertexExportRegisters(copy.shader, output.regs);
+   output.regs.sq_gs_vert_itemsize = copy.shader.ring_item_sizes[0] >> 2;
+   output.regs.vgt_strmout_buffer_en = copy.enabled_stream_buffers_mask;
+
+   /* SQ_GSVS_RING_ITEMSIZE, in dwords: one item holds every vertex one GS
+    * invocation can emit. RV730 needs no cache-line alignment here.
+    */
+   output.ringItemSize = (copy.shader.ring_item_sizes[0] * max_vertices) >> 2;
+}
+
 static bool CopyProgram(const r600_shader &shader, void *&program, uint32_t &size)
 {
    size = shader.bc.ndw * sizeof(uint32_t);
@@ -1083,6 +1148,8 @@ struct CafeCompiler::CompileState {
    std::array<unsigned, 32> vertex_semantics{};
    std::array<int, 32> attribute_locations{};
    std::unordered_map<std::string, unsigned> sampler_bindings;
+   /* Set on a vertex shader that feeds this compiled geometry shader. */
+   r600_pipe_shader *consumer_gs = nullptr;
    ReflectionInfo reflection;
 
    bool NeedsUniformBlockMode() const
@@ -1094,6 +1161,11 @@ struct CafeCompiler::CompileState {
 
    ~CompileState()
    {
+      if (r600_pipe_shader *copy = pipe_shader.gs_copy_shader) {
+         if (list_is_linked(&copy->shader.bc.cf))
+            r600_bytecode_clear(&copy->shader.bc);
+         free(copy);
+      }
       if (list_is_linked(&pipe_shader.shader.bc.cf))
          r600_bytecode_clear(&pipe_shader.shader.bc);
       free(pipe_shader.shader.arrays);
@@ -1101,6 +1173,18 @@ struct CafeCompiler::CompileState {
          standalone_destroy_shader_program(shader_program);
    }
 };
+
+static const char *StagePrefix(mesa_shader_stage stage)
+{
+   switch (stage) {
+   case MESA_SHADER_VERTEX:
+      return "Vertex shader: ";
+   case MESA_SHADER_GEOMETRY:
+      return "Geometry shader: ";
+   default:
+      return "Pixel shader: ";
+   }
+}
 
 CafeCompiler::CafeCompiler()
 {
@@ -1142,6 +1226,7 @@ bool CafeCompiler::InitializeContext()
    }
    InitializeR600NirOptions(*m_nir_options);
    m_ctx->screen->nir_options[MESA_SHADER_VERTEX] = m_nir_options;
+   m_ctx->screen->nir_options[MESA_SHADER_GEOMETRY] = m_nir_options;
    m_ctx->screen->nir_options[MESA_SHADER_FRAGMENT] = m_nir_options;
 
    m_ctx->Version = 45;
@@ -1177,7 +1262,8 @@ bool CafeCompiler::InitializeContext()
    m_ctx->Const.MaxUserAssignableUniformLocations =
       4 * MESA_SHADER_MESH_STAGES * MAX_UNIFORMS;
 
-   for (mesa_shader_stage stage : {MESA_SHADER_VERTEX, MESA_SHADER_FRAGMENT}) {
+   for (mesa_shader_stage stage :
+        {MESA_SHADER_VERTEX, MESA_SHADER_GEOMETRY, MESA_SHADER_FRAGMENT}) {
       m_ctx->Const.Program[stage].MaxTextureImageUnits = kMaxSamplers;
       m_ctx->Const.Program[stage].MaxUniformBlocks = kMaxUniformBlocks;
       m_ctx->Const.Program[stage].MaxUniformComponents = 16 * 1024;
@@ -1186,8 +1272,16 @@ bool CafeCompiler::InitializeContext()
    }
    m_ctx->Const.Program[MESA_SHADER_VERTEX].MaxAttribs = 32;
    m_ctx->Const.Program[MESA_SHADER_VERTEX].MaxOutputComponents = 128;
+   m_ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxInputComponents = 128;
+   m_ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxOutputComponents = 128;
    m_ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxInputComponents = 128;
-   m_ctx->Const.MaxCombinedTextureImageUnits = kMaxSamplers * 2;
+   /* GX2CalcGeometryShaderOutputRingBufferSize() gives each GS invocation's
+    * output 16384 times its item size, so keep the total output modest.
+    */
+   m_ctx->Const.MaxGeometryOutputVertices = 1024;
+   m_ctx->Const.MaxGeometryTotalOutputComponents = 1024;
+   m_ctx->Const.MaxGeometryShaderInvocations = 1;
+   m_ctx->Const.MaxCombinedTextureImageUnits = kMaxSamplers * 3;
 
    m_ctx->Extensions.ARB_ES3_compatibility = true;
    m_ctx->Extensions.ARB_ES3_1_compatibility = true;
@@ -1223,8 +1317,17 @@ bool CafeCompiler::CompileFrontend(const char *source,
    }
 
    const GLenum gl_shader_type = shader_type;
-   state.stage = gl_shader_type == GL_VERTEX_SHADER ?
-      MESA_SHADER_VERTEX : MESA_SHADER_FRAGMENT;
+   switch (gl_shader_type) {
+   case GL_VERTEX_SHADER:
+      state.stage = MESA_SHADER_VERTEX;
+      break;
+   case GL_GEOMETRY_SHADER:
+      state.stage = MESA_SHADER_GEOMETRY;
+      break;
+   default:
+      state.stage = MESA_SHADER_FRAGMENT;
+      break;
+   }
    state.shader_program = standalone_create_shader_program();
    state.shader_program->SeparateShader = true;
 
@@ -1293,7 +1396,7 @@ bool CafeCompiler::SelectMode(GLSLCompileMode requested_mode, CompileState &firs
                              (second && second->NeedsUniformBlockMode());
    if (requested_mode == GLSL_COMPILE_REGISTER && needs_blocks) {
       const CompileState &state = first.NeedsUniformBlockMode() ? first : *second;
-      diagnostics = state.stage == MESA_SHADER_VERTEX ? "Vertex shader: " : "Pixel shader: ";
+      diagnostics = StagePrefix(state.stage);
       diagnostics += state.uses_uniform_blocks ?
          "Explicit uniform blocks cannot use register mode" :
          "Non-block uniforms exceed Latte's 1024-component ALU constant file";
@@ -1395,8 +1498,40 @@ bool CafeCompiler::CompileR600(CompileState &state, std::string &diagnostics)
    if (state.stage == MESA_SHADER_FRAGMENT)
       state.key.ps.nr_cbufs = FragmentColorBufferCount(state.nir);
 
-   if (r600_shader_from_nir(m_rctx, &state.pipe_shader, &state.key)) {
+   if (state.stage == MESA_SHADER_GEOMETRY) {
+      const shader_info &info = state.nir->info;
+      if (info.gs.invocations > 1) {
+         diagnostics = "Geometry shader instancing (invocations > 1) is not supported by Latte";
+         return false;
+      }
+      if (BITSET_TEST(info.system_values_read, SYSTEM_VALUE_PRIMITIVE_ID)) {
+         /* GX2 leaves VGT_PRIMITIVEID_EN alone in geometry shader mode. */
+         diagnostics = "gl_PrimitiveIDIn is not supported by CafeGLSL yet";
+         return false;
+      }
+      state.selector.gs_output_prim = info.gs.output_primitive;
+      state.selector.gs_max_out_vertices = info.gs.vertices_out;
+      state.selector.gs_num_invocations = 1;
+   }
+
+   /* An export shader takes its ring layout from the geometry shader's inputs,
+    * which the backend reads through the context, as the driver would.
+    */
+   r600_pipe_shader_selector *bound_gs = m_rctx->gs_shader;
+   r600_pipe_shader_selector gs_selector{};
+   if (state.stage == MESA_SHADER_VERTEX && state.consumer_gs) {
+      state.key.vs.as_es = 1;
+      gs_selector.current = state.consumer_gs;
+      m_rctx->gs_shader = &gs_selector;
+   }
+   const int failed = r600_shader_from_nir(m_rctx, &state.pipe_shader, &state.key);
+   m_rctx->gs_shader = bound_gs;
+   if (failed) {
       diagnostics = "The R600 SFN backend failed to compile the shader";
+      return false;
+   }
+   if (state.stage == MESA_SHADER_GEOMETRY && !state.pipe_shader.gs_copy_shader) {
+      diagnostics = "The R600 backend failed to generate the GS copy shader";
       return false;
    }
 
@@ -1554,4 +1689,117 @@ GX2ShaderMode CafeCompiler::CompileShaderPair(const char *vertex_source, const c
          "Use GX2SetPixelUniformBlock instead of GX2SetPixelUniformReg to upload them.\n";
    }
    return vertex_state.mode;
+}
+
+GX2GeometryShader *CafeCompiler::CreateGeometryShader(CompileState &state,
+                                                     std::string &diagnostics,
+                                                     GLSL_COMPILER_FLAG flags)
+{
+   std::unique_ptr<GX2GeometryShader, decltype(&FreeGeometryShader)> output(
+      static_cast<GX2GeometryShader *>(calloc(1, sizeof(GX2GeometryShader))),
+      FreeGeometryShader);
+   if (!output) {
+      diagnostics = "Out of memory allocating GX2 geometry shader";
+      return nullptr;
+   }
+
+   const r600_pipe_shader &copy = *state.pipe_shader.gs_copy_shader;
+   output->mode = GX2_SHADER_MODE_GEOMETRY_SHADER;
+   if (!CopyProgram(state.pipe_shader.shader, output->program, output->size) ||
+       !CopyProgram(copy.shader, output->vertexProgram, output->vertexProgramSize) ||
+       !CopyReflection(state.reflection, output.get())) {
+      diagnostics = "Out of memory copying geometry shader output";
+      return nullptr;
+   }
+   FillGeometryRegisters(state.pipe_shader, state.nir, *output);
+
+   if (flags & GLSL_COMPILER_FLAG_GENERATE_DISASSEMBLY) {
+      r600_bytecode_disasm(&state.pipe_shader.shader.bc);
+      r600_bytecode_disasm(&state.pipe_shader.gs_copy_shader->shader.bc);
+   }
+   return output.release();
+}
+
+GX2ShaderMode CafeCompiler::CompileGeometryShaderSet(const char *vertex_source,
+                                                     const char *geometry_source,
+                                                     const char *pixel_source,
+                                                     GLSLCompileMode requested_mode,
+                                                     GX2VertexShader *&vertex_output,
+                                                     GX2GeometryShader *&geometry_output,
+                                                     GX2PixelShader *&pixel_output,
+                                                     std::string &diagnostics,
+                                                     GLSL_COMPILER_FLAG flags)
+{
+   if (requested_mode == GLSL_COMPILE_REGISTER) {
+      diagnostics = "Geometry shader mode always uses uniform blocks. "
+                    "Use GLSL_COMPILE_AUTO or GLSL_COMPILE_BLOCK";
+      return GLSL_SHADER_MODE_ERROR;
+   }
+   if (requested_mode != GLSL_COMPILE_AUTO && requested_mode != GLSL_COMPILE_BLOCK) {
+      diagnostics = "Invalid compile mode";
+      return GLSL_SHADER_MODE_ERROR;
+   }
+
+   CompileState vertex_state, geometry_state, pixel_state;
+   struct Stage {
+      CompileState *state;
+      unsigned gl_type;
+      mesa_shader_stage stage;
+      const char *source;
+   };
+   const std::array<Stage, 3> stages = {{
+      {&vertex_state, GL_VERTEX_SHADER, MESA_SHADER_VERTEX, vertex_source},
+      {&geometry_state, GL_GEOMETRY_SHADER, MESA_SHADER_GEOMETRY, geometry_source},
+      {&pixel_state, GL_FRAGMENT_SHADER, MESA_SHADER_FRAGMENT, pixel_source},
+   }};
+
+   for (const Stage &stage : stages) {
+      CompileState &state = *stage.state;
+      if (!CompileFrontend(stage.source, stage.gl_type, state, diagnostics)) {
+         diagnostics = StagePrefix(stage.stage) + diagnostics;
+         return GLSL_SHADER_MODE_ERROR;
+      }
+      /* SQ_CONFIG.DX9_CONSTS is clear in geometry shader mode, so every stage
+       * reads its uniforms from blocks.
+       */
+      state.mode = GX2_SHADER_MODE_UNIFORM_BLOCK;
+   }
+
+   /* The geometry shader goes first: its inputs fix the ring layout the vertex
+    * shader has to write.
+    */
+   vertex_state.consumer_gs = &geometry_state.pipe_shader;
+   for (CompileState *state : {&geometry_state, &vertex_state, &pixel_state}) {
+      if (!PrepareNir(*state, diagnostics) || !CompileR600(*state, diagnostics)) {
+         diagnostics = StagePrefix(state->stage) + diagnostics;
+         return GLSL_SHADER_MODE_ERROR;
+      }
+   }
+
+   std::unique_ptr<GX2VertexShader, decltype(&FreeVertexShader)> vertex(
+      CreateVertexShader(vertex_state, diagnostics, flags), FreeVertexShader);
+   if (!vertex)
+      return GLSL_SHADER_MODE_ERROR;
+   std::unique_ptr<GX2GeometryShader, decltype(&FreeGeometryShader)> geometry(
+      CreateGeometryShader(geometry_state, diagnostics, flags), FreeGeometryShader);
+   if (!geometry)
+      return GLSL_SHADER_MODE_ERROR;
+   std::unique_ptr<GX2PixelShader, decltype(&FreePixelShader)> pixel(
+      CreatePixelShader(pixel_state, diagnostics, flags), FreePixelShader);
+   if (!pixel)
+      return GLSL_SHADER_MODE_ERROR;
+
+   /* GX2SetVertexShader() programs the ES stage, not the VS stage, when the
+    * shader's mode is GX2_SHADER_MODE_GEOMETRY_SHADER.
+    */
+   vertex->mode = GX2_SHADER_MODE_GEOMETRY_SHADER;
+   pixel->mode = GX2_SHADER_MODE_GEOMETRY_SHADER;
+   /* SQ_ESGS_RING_ITEMSIZE, in dwords: one vertex of the geometry shader's input. */
+   vertex->ringItemsize = geometry_state.pipe_shader.shader.ring_item_sizes[0] >> 2;
+   vertex->regs.vgt_strmout_buffer_en = 0;
+
+   vertex_output = vertex.release();
+   geometry_output = geometry.release();
+   pixel_output = pixel.release();
+   return GX2_SHADER_MODE_GEOMETRY_SHADER;
 }

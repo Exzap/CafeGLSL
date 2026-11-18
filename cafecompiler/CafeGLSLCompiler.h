@@ -52,8 +52,33 @@ GX2ShaderMode CompileShaderPair(const char *vertexSource, const char *pixelSourc
                                       char *infoLogOut, int infoLogMaxLength,
                                       GLSL_COMPILER_FLAG flags);
 
+/* Defined when CompileGeometryShaderSet() and FreeGeometryShader() are available. */
+#define CAFEGLSL_HAS_GEOMETRY_SHADERS 1
+
+/* Compile a vertex, geometry and pixel shader for GX2_SHADER_MODE_GEOMETRY_SHADER.
+ * Returns GX2_SHADER_MODE_GEOMETRY_SHADER, or GLSL_SHADER_MODE_ERROR on failure.
+ * All three sources are required, and requestedMode must be GLSL_COMPILE_AUTO or
+ * GLSL_COMPILE_BLOCK: geometry shader mode always reads uniforms from blocks, so
+ * loose uniforms are moved into binding 0 as in GLSL_COMPILE_BLOCK.
+ *
+ * The vertex shader is compiled as an export shader: it writes the GS input ring
+ * instead of the rasterizer. Use it only with this geometry shader, and pass its
+ * ringItemsize to GX2CalcGeometryShaderInputRingBufferSize and the geometry
+ * shader's ringItemSize to GX2CalcGeometryShaderOutputRingBufferSize when sizing
+ * the rings for GX2SetGeometryShaderInputRingBuffer / OutputRingBuffer.
+ * Vertex outputs are matched to geometry inputs by varying slot; unmatched
+ * outputs are dropped. */
+GX2ShaderMode CompileGeometryShaderSet(const char *vertexSource, const char *geometrySource,
+                                       const char *pixelSource, GLSLCompileMode requestedMode,
+                                       GX2VertexShader **vertexOut,
+                                       GX2GeometryShader **geometryOut,
+                                       GX2PixelShader **pixelOut,
+                                       char *infoLogOut, int infoLogMaxLength,
+                                       GLSL_COMPILER_FLAG flags);
+
 /* Free shaders when done. Null shaders are accepted. */
 void FreeVertexShader(GX2VertexShader *shader);
+void FreeGeometryShader(GX2GeometryShader *shader);
 void FreePixelShader(GX2PixelShader *shader);
 void FreeShaders(GX2VertexShader *vertex, GX2PixelShader *pixel);
 

@@ -27,7 +27,7 @@ env:
     --buildtype=release
 
   # A bare `meson test` would pull in Mesa's own tests, which this build lacks.
-  MESON_TESTS: cafeglsl-smoke cafeglsl-skinning-regression cafeglsl-uber-regression
+  MESON_TESTS: cafeglsl-smoke cafeglsl-skinning-regression cafeglsl-uber-regression cafeglsl-geometry-set
 
 jobs:
   linux:
@@ -188,7 +188,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates git pkg-config ninja-build \
             python3-pip python3-setuptools python3-mako python3-yaml \
-            python3-packaging bison flex
+            python3-packaging bison flex cmake
           pip3 install --no-cache-dir 'meson>=1.4' \
             || pip3 install --no-cache-dir --break-system-packages 'meson>=1.4'
 
@@ -220,4 +220,20 @@ jobs:
         with:
           name: cafeglsl-wiiu-ppc
           path: stage/
+          if-no-files-found: error
+
+      - name: Build the geometry shader test app
+        run: |
+          "$DEVKITPRO/portlibs/wiiu/bin/powerpc-eabi-cmake" \
+            -S cafecompiler/examples/gs-test -B build-gs-test \
+            -DCMAKE_BUILD_TYPE=Release \
+            -Dcafeglsl_DIR="$PWD/stage/lib/cmake/cafeglsl"
+          cmake --build build-gs-test
+          mkdir -p gs-test
+          cp build-gs-test/*.rpx build-gs-test/*.wuhb gs-test/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cafeglsl-gs-test
+          path: gs-test/
           if-no-files-found: error

@@ -103,6 +103,14 @@ if host_machine.system() != 'cafeos'
     args : ['-vs'] + files('testdata/nsmbu-uber.vert'),
   )
 
+  # vertex + geometry + pixel in geometry shader mode
+  test(
+    'cafeglsl-geometry-set',
+    cafeglsl_cli,
+    args : ['-vs'] + files('testdata/sprite.vert') +
+           ['-gs'] + files('testdata/sprite.geom') +
+           ['-ps'] + files('testdata/sprite.frag'),
+  )
   test(
     'cafeglsl-single-pixel-block',
     cafeglsl_cli,

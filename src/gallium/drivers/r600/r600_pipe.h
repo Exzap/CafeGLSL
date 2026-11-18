@@ -82,6 +82,12 @@
  * a const buffer, just a buffer resource.
  */
 #define R600_GS_RING_CONST_BUFFER (R600_MAX_USER_CONST_BUFFERS + 2)
+/* The buffer id the ESGS/GSVS ring fetches use. On GX2 both rings are bound by
+ * GX2SetGeometryShaderInputRingBuffer / GX2SetGeometryShaderOutputRingBuffer as
+ * the last fetch resource of their stage (GS_GSIN_RESOURCE 0x1EF = GS base 0x150
+ * + 0x9F, VS_GSOUT_RESOURCE 0x13F = VS base 0xA0 + 0x9F), not as a const buffer.
+ */
+#define R600_GS_RING_FETCH_BUFFER 0x9F
 /* Currently R600_MAX_CONST_BUFFERS just fits on the hw, which has a limit
  * of 16 const buffers.
  * UCP/SAMPLE_POSITIONS are never accessed by same shader stage so they can use the same id.
